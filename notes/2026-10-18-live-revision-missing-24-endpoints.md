@@ -38,9 +38,14 @@
 即"修好"发生在最后一次部署之后；23:22 那个会话跑到 23:39 撞上工具迭代上限，以
 "Cannot Deploy — 环境受限"的报告收尾；grep 全量消息，23:14 之后再无 `deno deploy` 调用。
 
-**顺带核实的一条机制**：`deno check main.ts` 现在仍报 **Found 17 errors**，而部署命令是
-`deno deploy . --org yadinae --app openllm --prod --no-check` —— **类型检查对部署完全不设闸**，
-类型烂成什么样都能"部署成功"。
+**顺带核实的一条机制**：部署命令 `deno deploy . --org yadinae --app openllm --prod` **没有 `--no-check` 选项**——
+新 CLI 报 `Unknown option "--no-check"`，类型检查是在构建环节做的、不能绕过。
+当前 `deno check main.ts` 报 **Found 16 errors**（删掉重复的 `kilo` key 之前是 17），
+全是 `DbEntry`↔`ApiKey` / `isFree` 缺失这类**类型摩擦**：原因是 `db/pg.ts` 沿用一套**自己的** `DbEntry`
+（`id: string`，字段 optional），而 `db/mod.ts` 的 `DbEntry = ApiKey`（`id: number`，`base_url: string` 非空）
+是另一套，`routes/api.ts` 把两套捎到一起。部署因此**挂在 building**（`revision x445xzf9fgmq`,
+`lastStep: "building"`、错误见 `deno check`）。这也是为什么"类型先放着"没能留到部署时才爆 ——
+新 CLI 把类型检查设为了部署闸门。
 
 **遗留风险（均未解决）**：
 
