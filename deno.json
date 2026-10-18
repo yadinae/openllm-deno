@@ -1,0 +1,66 @@
+{
+  "imports": {
+    "hono": "jsr:@hono/hono@^4.6.0",
+    "postgres": "npm:postgres@^3.4.5"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "types": ["deno.runtime"]
+  },
+  "deploy": {
+    "entrypoint": "main.ts",
+    "org": "yadinae",
+    "app": "openllm"
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

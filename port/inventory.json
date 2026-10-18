@@ -1,0 +1,1732 @@
+{
+ "generated_from": "/home/admin/projects/freellmapi/server/src",
+ "total_endpoints": 185,
+ "endpoints": [
+  {
+   "file": "analytics",
+   "line": 91,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/search",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 97,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/summary",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 238,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/by-model",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 300,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/by-platform",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 375,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/by-client",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 407,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/by-key",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 445,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/timeline",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 492,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/error-distribution",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 576,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/errors",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 613,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/requests",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "analytics",
+   "line": 739,
+   "method": "GET",
+   "mount": "/api/analytics",
+   "path": "/requests/:id",
+   "kind": "path",
+   "router_ident": "analyticsRouter"
+  },
+  {
+   "file": "anthropic",
+   "line": 455,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/messages",
+   "kind": "path",
+   "router_ident": "anthropicRouter"
+  },
+  {
+   "file": "anthropic",
+   "line": 1103,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/messages/count_tokens",
+   "kind": "path",
+   "router_ident": "anthropicRouter"
+  },
+  {
+   "file": "anthropic",
+   "line": 1142,
+   "method": "GET",
+   "mount": "/v1",
+   "path": "/models",
+   "kind": "path",
+   "router_ident": "anthropicRouter"
+  },
+  {
+   "file": "auth",
+   "line": 135,
+   "method": "GET",
+   "mount": "/api/auth",
+   "path": "/status",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 146,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/setup",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 179,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/login",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 209,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/logout",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 214,
+   "method": "GET",
+   "mount": "/api/auth",
+   "path": "/me",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 229,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/change-email",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 271,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/change-password",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 302,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/forgot-password",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "auth",
+   "line": 325,
+   "method": "POST",
+   "mount": "/api/auth",
+   "path": "/reset-password",
+   "kind": "path",
+   "router_ident": "authRouter"
+  },
+  {
+   "file": "backups",
+   "line": 53,
+   "method": "GET",
+   "mount": "/api/backups",
+   "path": "/tables",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 57,
+   "method": "GET",
+   "mount": "/api/backups",
+   "path": "/schedule",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 61,
+   "method": "PUT",
+   "mount": "/api/backups",
+   "path": "/schedule",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 78,
+   "method": "GET",
+   "mount": "/api/backups",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 84,
+   "method": "POST",
+   "mount": "/api/backups",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 98,
+   "method": "GET",
+   "mount": "/api/backups",
+   "path": "/:id/download",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 112,
+   "method": "POST",
+   "mount": "/api/backups",
+   "path": "/:id/restore",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "backups",
+   "line": 126,
+   "method": "DELETE",
+   "mount": "/api/backups",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "backupsRouter"
+  },
+  {
+   "file": "cache",
+   "line": 18,
+   "method": "GET",
+   "mount": "/api/cache",
+   "path": "/stats",
+   "kind": "path",
+   "router_ident": "cacheRouter"
+  },
+  {
+   "file": "cache",
+   "line": 33,
+   "method": "PUT",
+   "mount": "/api/cache",
+   "path": "/config",
+   "kind": "path",
+   "router_ident": "cacheRouter"
+  },
+  {
+   "file": "cache",
+   "line": 47,
+   "method": "DELETE",
+   "mount": "/api/cache",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "cacheRouter"
+  },
+  {
+   "file": "client-profiles",
+   "line": 82,
+   "method": "GET",
+   "mount": "/api/client-profiles",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "clientProfilesRouter"
+  },
+  {
+   "file": "client-profiles",
+   "line": 87,
+   "method": "POST",
+   "mount": "/api/client-profiles",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "clientProfilesRouter"
+  },
+  {
+   "file": "client-profiles",
+   "line": 105,
+   "method": "PATCH",
+   "mount": "/api/client-profiles",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "clientProfilesRouter"
+  },
+  {
+   "file": "client-profiles",
+   "line": 133,
+   "method": "POST",
+   "mount": "/api/client-profiles",
+   "path": "/:id/rotate",
+   "kind": "path",
+   "router_ident": "clientProfilesRouter"
+  },
+  {
+   "file": "client-profiles",
+   "line": 149,
+   "method": "DELETE",
+   "mount": "/api/client-profiles",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "clientProfilesRouter"
+  },
+  {
+   "file": "compression",
+   "line": 28,
+   "method": "GET",
+   "mount": "/api/compression",
+   "path": "/stats",
+   "kind": "path",
+   "router_ident": "compressionRouter"
+  },
+  {
+   "file": "compression",
+   "line": 48,
+   "method": "POST",
+   "mount": "/api/compression",
+   "path": "/preview",
+   "kind": "path",
+   "router_ident": "compressionRouter"
+  },
+  {
+   "file": "conversations",
+   "line": 175,
+   "method": "GET",
+   "mount": "/api/conversations",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "conversationsRouter"
+  },
+  {
+   "file": "conversations",
+   "line": 196,
+   "method": "GET",
+   "mount": "/api/conversations",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "conversationsRouter"
+  },
+  {
+   "file": "conversations",
+   "line": 204,
+   "method": "POST",
+   "mount": "/api/conversations",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "conversationsRouter"
+  },
+  {
+   "file": "conversations",
+   "line": 229,
+   "method": "PUT",
+   "mount": "/api/conversations",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "conversationsRouter"
+  },
+  {
+   "file": "conversations",
+   "line": 264,
+   "method": "DELETE",
+   "mount": "/api/conversations",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "conversationsRouter"
+  },
+  {
+   "file": "docs",
+   "line": 14,
+   "method": "GET",
+   "mount": "/v1",
+   "path": "/openapi.json",
+   "kind": "path",
+   "router_ident": "docsRouter"
+  },
+  {
+   "file": "docs",
+   "line": 20,
+   "method": "GET",
+   "mount": "/v1",
+   "path": "/docs",
+   "kind": "path",
+   "router_ident": "docsRouter"
+  },
+  {
+   "file": "embeddings",
+   "line": 20,
+   "method": "GET",
+   "mount": "/api/embeddings",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "embeddingsRouter"
+  },
+  {
+   "file": "embeddings",
+   "line": 85,
+   "method": "POST",
+   "mount": "/api/embeddings",
+   "path": "/custom",
+   "kind": "path",
+   "router_ident": "embeddingsRouter"
+  },
+  {
+   "file": "embeddings",
+   "line": 183,
+   "method": "PUT",
+   "mount": "/api/embeddings",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "embeddingsRouter"
+  },
+  {
+   "file": "embeddings",
+   "line": 211,
+   "method": "DELETE",
+   "mount": "/api/embeddings",
+   "path": "/custom/:id",
+   "kind": "path",
+   "router_ident": "embeddingsRouter"
+  },
+  {
+   "file": "embeddings",
+   "line": 246,
+   "method": "GET",
+   "mount": "/api/embeddings",
+   "path": "/usage",
+   "kind": "path",
+   "router_ident": "embeddingsRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 26,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/quota-forecast",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 33,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/routing",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 45,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/penalty-inspector",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 52,
+   "method": "DELETE",
+   "mount": "/api/fallback",
+   "path": "/penalty-inspector",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 89,
+   "method": "PUT",
+   "mount": "/api/fallback",
+   "path": "/routing",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 218,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 347,
+   "method": "PUT",
+   "mount": "/api/fallback",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 404,
+   "method": "POST",
+   "mount": "/api/fallback",
+   "path": "/sort/:preset",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 451,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/token-usage",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "fallback",
+   "line": 591,
+   "method": "GET",
+   "mount": "/api/fallback",
+   "path": "/rate-limit-usage",
+   "kind": "path",
+   "router_ident": "fallbackRouter"
+  },
+  {
+   "file": "free-tier",
+   "line": 106,
+   "method": "GET",
+   "mount": "/api/free-tier",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "freeTierRouter"
+  },
+  {
+   "file": "gemini",
+   "line": 80,
+   "method": "GET",
+   "mount": "/v1beta",
+   "path": "/models",
+   "kind": "path",
+   "router_ident": "geminiRouter"
+  },
+  {
+   "file": "gemini",
+   "line": 95,
+   "method": "GET",
+   "mount": "/v1beta",
+   "path": "~REGEX:^\\/models\\/(.+)$",
+   "kind": "regex",
+   "router_ident": "geminiRouter"
+  },
+  {
+   "file": "gemini",
+   "line": 227,
+   "method": "POST",
+   "mount": "/v1beta",
+   "path": "~REGEX:^\\/models\\/(.+):generateContent$",
+   "kind": "regex",
+   "router_ident": "geminiRouter"
+  },
+  {
+   "file": "gemini",
+   "line": 229,
+   "method": "POST",
+   "mount": "/v1beta",
+   "path": "~REGEX:^\\/models\\/(.+):streamGenerateContent$",
+   "kind": "regex",
+   "router_ident": "geminiRouter"
+  },
+  {
+   "file": "gemini",
+   "line": 231,
+   "method": "POST",
+   "mount": "/v1beta",
+   "path": "~REGEX:^\\/models\\/(.+):countTokens$",
+   "kind": "regex",
+   "router_ident": "geminiRouter"
+  },
+  {
+   "file": "health",
+   "line": 13,
+   "method": "GET",
+   "mount": "/api/health",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "healthRouter"
+  },
+  {
+   "file": "health",
+   "line": 64,
+   "method": "POST",
+   "mount": "/api/health",
+   "path": "/check/:keyId",
+   "kind": "path",
+   "router_ident": "healthRouter"
+  },
+  {
+   "file": "health",
+   "line": 78,
+   "method": "POST",
+   "mount": "/api/health",
+   "path": "/check-all",
+   "kind": "path",
+   "router_ident": "healthRouter"
+  },
+  {
+   "file": "health",
+   "line": 89,
+   "method": "POST",
+   "mount": "/api/health",
+   "path": "/quota/:keyId",
+   "kind": "path",
+   "router_ident": "healthRouter"
+  },
+  {
+   "file": "keys",
+   "line": 300,
+   "method": "GET",
+   "mount": "/api/keys",
+   "path": "/providers",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 343,
+   "method": "GET",
+   "mount": "/api/keys",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 475,
+   "method": "DELETE",
+   "mount": "/api/keys",
+   "path": "/:id/cooldowns",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 520,
+   "method": "GET",
+   "mount": "/api/keys",
+   "path": "/export",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 641,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/:id/reveal",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 672,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 986,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/custom/discover-models",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1117,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/discovered-models",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1154,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/custom/probe",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1247,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/custom",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1432,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/import",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1528,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/preview",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1588,
+   "method": "POST",
+   "mount": "/api/keys",
+   "path": "/import-selected",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1680,
+   "method": "DELETE",
+   "mount": "/api/keys",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1748,
+   "method": "PATCH",
+   "mount": "/api/keys",
+   "path": "/platform/:platform",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "keys",
+   "line": 1782,
+   "method": "PATCH",
+   "mount": "/api/keys",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "keysRouter"
+  },
+  {
+   "file": "logs",
+   "line": 56,
+   "method": "GET",
+   "mount": "/api/logs",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "logsRouter"
+  },
+  {
+   "file": "logs",
+   "line": 103,
+   "method": "POST",
+   "mount": "/api/logs",
+   "path": "/clear",
+   "kind": "path",
+   "router_ident": "logsRouter"
+  },
+  {
+   "file": "mcp",
+   "line": 621,
+   "method": "POST",
+   "mount": "/mcp",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "mcpRouter"
+  },
+  {
+   "file": "mcp",
+   "line": 645,
+   "method": "GET",
+   "mount": "/mcp",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "mcpRouter"
+  },
+  {
+   "file": "mcp",
+   "line": 648,
+   "method": "DELETE",
+   "mount": "/mcp",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "mcpRouter"
+  },
+  {
+   "file": "media",
+   "line": 16,
+   "method": "GET",
+   "mount": "/api/media",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "mediaRouter"
+  },
+  {
+   "file": "media",
+   "line": 56,
+   "method": "GET",
+   "mount": "/api/media",
+   "path": "/usage",
+   "kind": "path",
+   "router_ident": "mediaRouter"
+  },
+  {
+   "file": "media",
+   "line": 118,
+   "method": "POST",
+   "mount": "/api/media",
+   "path": "/custom",
+   "kind": "path",
+   "router_ident": "mediaRouter"
+  },
+  {
+   "file": "media",
+   "line": 172,
+   "method": "PUT",
+   "mount": "/api/media",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "mediaRouter"
+  },
+  {
+   "file": "media",
+   "line": 191,
+   "method": "DELETE",
+   "mount": "/api/media",
+   "path": "/custom/:id",
+   "kind": "path",
+   "router_ident": "mediaRouter"
+  },
+  {
+   "file": "models",
+   "line": 104,
+   "method": "POST",
+   "mount": "/api/models",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "models",
+   "line": 220,
+   "method": "DELETE",
+   "mount": "/api/models",
+   "path": "/custom/:id",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "models",
+   "line": 248,
+   "method": "PATCH",
+   "mount": "/api/models",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "models",
+   "line": 333,
+   "method": "DELETE",
+   "mount": "/api/models",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "models",
+   "line": 366,
+   "method": "POST",
+   "mount": "/api/models",
+   "path": "/:id/test",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "models",
+   "line": 430,
+   "method": "GET",
+   "mount": "/api/models",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "modelsRouter"
+  },
+  {
+   "file": "moderation",
+   "line": 25,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/moderations",
+   "kind": "path",
+   "router_ident": "moderationRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 96,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/api/tags",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 119,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/api/version",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 127,
+   "method": "POST",
+   "mount": "(root)",
+   "path": "/api/show",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 386,
+   "method": "POST",
+   "mount": "(root)",
+   "path": "/api/chat",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 501,
+   "method": "POST",
+   "mount": "(root)",
+   "path": "/api/generate",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 595,
+   "method": "POST",
+   "mount": "(root)",
+   "path": "/api/embed",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "ollama",
+   "line": 602,
+   "method": "POST",
+   "mount": "(root)",
+   "path": "/api/embeddings",
+   "kind": "path",
+   "router_ident": "ollamaRouter"
+  },
+  {
+   "file": "premium",
+   "line": 35,
+   "method": "GET",
+   "mount": "/api/premium",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "premiumRouter"
+  },
+  {
+   "file": "premium",
+   "line": 45,
+   "method": "POST",
+   "mount": "/api/premium",
+   "path": "/key",
+   "kind": "path",
+   "router_ident": "premiumRouter"
+  },
+  {
+   "file": "premium",
+   "line": 76,
+   "method": "DELETE",
+   "mount": "/api/premium",
+   "path": "/key",
+   "kind": "path",
+   "router_ident": "premiumRouter"
+  },
+  {
+   "file": "premium",
+   "line": 86,
+   "method": "POST",
+   "mount": "/api/premium",
+   "path": "/sync",
+   "kind": "path",
+   "router_ident": "premiumRouter"
+  },
+  {
+   "file": "premium",
+   "line": 97,
+   "method": "POST",
+   "mount": "/api/premium",
+   "path": "/portal",
+   "kind": "path",
+   "router_ident": "premiumRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 66,
+   "method": "GET",
+   "mount": "/api/profiles",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 77,
+   "method": "GET",
+   "mount": "/api/profiles",
+   "path": "/active",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 85,
+   "method": "POST",
+   "mount": "/api/profiles",
+   "path": "/active",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 109,
+   "method": "GET",
+   "mount": "/api/profiles",
+   "path": "/:id/models",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 139,
+   "method": "POST",
+   "mount": "/api/profiles",
+   "path": "/",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 207,
+   "method": "PUT",
+   "mount": "/api/profiles",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 281,
+   "method": "PUT",
+   "mount": "/api/profiles",
+   "path": "/:id/reorder",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 309,
+   "method": "POST",
+   "mount": "/api/profiles",
+   "path": "/:id/reset",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 348,
+   "method": "DELETE",
+   "mount": "/api/profiles",
+   "path": "/:id",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "profiles",
+   "line": 422,
+   "method": "POST",
+   "mount": "/api/profiles",
+   "path": "/:id/sort/:preset",
+   "kind": "path",
+   "router_ident": "profilesRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 315,
+   "method": "GET",
+   "mount": "/v1",
+   "path": "/models",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 678,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/embeddings",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 713,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/rerank",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 753,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/search",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 797,
+   "method": "GET",
+   "mount": "/v1",
+   "path": "/search/engines",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 841,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/images/generations",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 879,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/videos/generations",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 935,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/audio/speech",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 984,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/audio/transcriptions",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 1148,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/completions",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "proxy",
+   "line": 1565,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/chat/completions",
+   "kind": "path",
+   "router_ident": "proxyRouter"
+  },
+  {
+   "file": "responses",
+   "line": 656,
+   "method": "POST",
+   "mount": "/v1",
+   "path": "/responses",
+   "kind": "path",
+   "router_ident": "responsesRouter"
+  },
+  {
+   "file": "search",
+   "line": 11,
+   "method": "GET",
+   "mount": "/api/search",
+   "path": "/engines",
+   "kind": "path",
+   "router_ident": "searchRouter"
+  },
+  {
+   "file": "search",
+   "line": 22,
+   "method": "PATCH",
+   "mount": "/api/search",
+   "path": "/engines/:id",
+   "kind": "path",
+   "router_ident": "searchRouter"
+  },
+  {
+   "file": "settings",
+   "line": 43,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/version",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 53,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/update-check",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 57,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/update-check",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 72,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/compression",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 76,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/compression",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 94,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/unify",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 105,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/unify",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 118,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/fusion",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 124,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/fusion",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 140,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/enable-mcp",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 146,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/enable-mcp",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 159,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/anthropic-map",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 165,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/anthropic-map",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 176,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/gemini-map",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 180,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/gemini-map",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 196,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/agent-compatibility",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 203,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/agent-compatibility",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 224,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/url-tokens",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 228,
+   "method": "POST",
+   "mount": "/api/settings",
+   "path": "/url-tokens",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 237,
+   "method": "DELETE",
+   "mount": "/api/settings",
+   "path": "/url-tokens/:id",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 264,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/output-limit",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 279,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/output-limit",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 295,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/guardrails",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 310,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/headroom",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 322,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/headroom",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 344,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/task-weight-share",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 354,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/task-weight-share",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 372,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/min-reliability-floor",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 382,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/min-reliability-floor",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 398,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/guardrails",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 418,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/api-key",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 423,
+   "method": "POST",
+   "mount": "/api/settings",
+   "path": "/api-key/regenerate",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 429,
+   "method": "GET",
+   "mount": "/api/settings",
+   "path": "/proxy",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 460,
+   "method": "PUT",
+   "mount": "/api/settings",
+   "path": "/proxy",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "settings",
+   "line": 578,
+   "method": "POST",
+   "mount": "/api/settings",
+   "path": "/proxy/test",
+   "kind": "path",
+   "router_ident": "settingsRouter"
+  },
+  {
+   "file": "status",
+   "line": 41,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/livez",
+   "kind": "path",
+   "router_ident": "statusRouter"
+  },
+  {
+   "file": "status",
+   "line": 64,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/readyz",
+   "kind": "path",
+   "router_ident": "statusRouter"
+  },
+  {
+   "file": "status",
+   "line": 112,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/providers",
+   "kind": "path",
+   "router_ident": "providersRouter"
+  },
+  {
+   "file": "status",
+   "line": 221,
+   "method": "GET",
+   "mount": "(root)",
+   "path": "/quota-forecast",
+   "kind": "path",
+   "router_ident": "providersRouter"
+  },
+  {
+   "file": "update",
+   "line": 572,
+   "method": "GET",
+   "mount": "/api/update",
+   "path": "/release",
+   "kind": "path",
+   "router_ident": "router"
+  },
+  {
+   "file": "update",
+   "line": 589,
+   "method": "GET",
+   "mount": "/api/update",
+   "path": "/check",
+   "kind": "path",
+   "router_ident": "router"
+  },
+  {
+   "file": "update",
+   "line": 623,
+   "method": "GET",
+   "mount": "/api/update",
+   "path": "/status",
+   "kind": "path",
+   "router_ident": "router"
+  },
+  {
+   "file": "update",
+   "line": 652,
+   "method": "POST",
+   "mount": "/api/update",
+   "path": "/apply",
+   "kind": "path",
+   "router_ident": "router"
+  }
+ ],
+ "mounts": {
+  "adminRateLimiter": "/api",
+  "authRouter": "/api/auth",
+  "keysRouter": "/api/keys",
+  "clientProfilesRouter": "/api/client-profiles",
+  "conversationsRouter": "/api/conversations",
+  "logsRouter": "/api/logs",
+  "modelsRouter": "/api/models",
+  "profilesRouter": "/api/profiles",
+  "fallbackRouter": "/api/fallback",
+  "embeddingsRouter": "/api/embeddings",
+  "mediaRouter": "/api/media",
+  "searchRouter": "/api/search",
+  "analyticsRouter": "/api/analytics",
+  "healthRouter": "/api/health",
+  "freeTierRouter": "/api/free-tier",
+  "settingsRouter": "/api/settings",
+  "premiumRouter": "/api/premium",
+  "backupsRouter": "/api/backups",
+  "cacheRouter": "/api/cache",
+  "compressionRouter": "/api/compression",
+  "updateRouter": "/api/update",
+  "docsRouter": "/v1",
+  "providersRouter": "/v1",
+  "urlTokenRouter": "/v1/t/:token",
+  "anthropicRouter": "/v1",
+  "proxyRouter": "/v1",
+  "moderationRouter": "/v1",
+  "responsesRouter": "/v1",
+  "geminiRouter": "/v1beta",
+  "mcpRouter": "/mcp",
+  "statusRouter": "",
+  "ollamaRouter": ""
+ },
+ "per_prefix": {
+  "/api/settings": 35,
+  "/v1": 18,
+  "/api/keys": 16,
+  "/api/analytics": 11,
+  "(root)": 11,
+  "/api/fallback": 10,
+  "/api/profiles": 10,
+  "/api/auth": 9,
+  "/api/backups": 8,
+  "/api/models": 6,
+  "/api/client-profiles": 5,
+  "/api/conversations": 5,
+  "/api/embeddings": 5,
+  "/v1beta": 5,
+  "/api/media": 5,
+  "/api/premium": 5,
+  "/api/health": 4,
+  "/api/update": 4,
+  "/api/cache": 3,
+  "/mcp": 3,
+  "/api/compression": 2,
+  "/api/logs": 2,
+  "/api/search": 2,
+  "/api/free-tier": 1
+ },
+ "unmounted_prefixes": []
+}

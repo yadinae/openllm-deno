@@ -1,0 +1,79 @@
+/**
+ * Phase 1: FreeLLMAPI → Deno Deploy (MVP)
+ *
+ * Loads settings + encrypted api_keys from db/data.json (exported from SQLite).
+ * Implements /v1/chat/completions and /v1/models with OpenAI-compatible providers.
+ *
+ * Run locally: deno run -A --no-check main.ts
+ * Deploy: deno deploy . --org yadinae --app freellmapi-deno --prod
+ */
+
+import { Hono } from "hono";
+import { serveStatic } from "hono/deno";
+import { getDb, getSetting, getAllEnabledKeys, loadDb } from "./db/mod.ts";
+import { openaiCompatProvider } from "./providers/openai-compat.ts";
+import { getModels } from "./routes/models.ts";
+import { chatRouter } from "./routes/chat.ts";
+
+const app = new Hono<{ Variables: { db: ReturnType<typeof getDb> } }>();
+
+// Load DB at startup (must be called before any route that accesses db)
+await loadDb("db/data.json");
+
+// Inject db into context
+app.use("*", async (c, next) => {
+  c.set("db", getDb());
+  await next();
+});
+
+// Routes
+app.route("/v1", chatRouter);
+app.get("/v1/models", getModels);
+
+// Dashboard SPA (Phase 2)
+app.get("/dashboard", (c) => c.redirect("/"));
+app.get("/", async (c) => {
+  return c.html(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FreeLLMAPI Deno</title>
+<style>
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;padding:40px;text-align:center}
+h1{color:#38bdf8}
+.card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:24px;margin:16px auto;max-width:600px;text-align:left}
+.card h2{color:#94a3b8;font-size:14px;text-transform:uppercase;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1e293b;font-size:14px}
+.row:last-child{border:none}
+.key{color:#34d399;font-family:monospace}
+</style>
+</head>
+<body>
+<h1>FreeLLMAPI <span style="font-size:14px;color:#64748b">Deno Deploy MVP</span></h1>
+<div class="card"><h2>Runtime</h2>
+  <div class="row"><span>Region</span><span class="key">${Deno.hostname()}</span></div>
+  <div class="row"><span>Uptime</span><span class="key" id="up">—</span></div>
+  <div class="row"><span>Requests</span><span class="key" id="reqs">—</span></div>
+</div>
+<div class="card"><h2>Endpoints</h2>
+  <div class="row"><span>Chat</span><span class="key">POST /v1/chat/completions</span></div>
+  <div class="row"><span>Models</span><span class="key">GET /v1/models</span></div>
+  <div class="row"><span>Health</span><span class="key">GET /health</span></div>
+</div>
+<script>
+let s=Date.now();
+fetch('/v1/models').then(r=>r.json()).then(d=>{
+  document.getElementById('reqs').textContent=(d.data||[]).length+' models';
+}).catch(()=>{});
+setInterval(()=>{document.getElementById('up').textContent=Math.round((Date.now()-s)/1000)+'s'},5000);
+</script>
+</body></html>`);
+});
+
+// Health check
+app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString(), hostname: Deno.hostname() }));
+
+// Start
+const port = Number(Deno.env.get("PORT") || "9999");
+console.log(`[freellmapi-deno] starting on :${port}`);
+Deno.serve({ port, hostname: "0.0.0.0" }, app.fetch);

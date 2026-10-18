@@ -1,0 +1,133 @@
+/**
+ * DB layer: loads settings + api_keys from data.json (exported from SQLite).
+ * Uses Deno.crypto.subtle for AES-256-GCM decryption.
+ */
+
+export interface DbSettings {
+  [key: string]: string;
+}
+
+export interface ApiKey {
+  id: number;
+  platform: string;
+  label: string;
+  encrypted_key: string;
+  iv: string;
+  auth_tag: string;
+  status: string;
+  enabled: boolean;
+  base_url: string;
+}
+
+export interface DbData {
+  encryption_key: string;
+  settings: DbSettings;
+  api_keys: ApiKey[];
+}
+
+// In-memory store (loaded once at startup from data.json)
+let _data: DbData | null = null;
+let _encKey: Uint8Array | null = null;
+
+const ALGO = "AES-GCM";
+const IV_LEN = 16;
+const AUTH_TAG_LEN = 16;
+
+async function deriveKey(hexKey: string): Promise<CryptoKey> {
+  const raw = hexToBytes(hexKey);
+  return crypto.subtle.importKey("raw", raw, { name: ALGO, length: 256 }, false, ["encrypt", "decrypt"]);
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function decryptKey(encryptedHex: string, ivHex: string, authTagHex: string): Promise<string> {
+  if (!_encKey) throw new Error("Encryption key not loaded");
+  const key = await crypto.subtle.importKey("raw", _encKey, { name: ALGO, length: 256 }, false, ["decrypt"]);
+  const iv = hexToBytes(ivHex);
+  const authTag = hexToBytes(authTagHex);
+  // Append auth tag to ciphertext for Web Crypto API
+  const ciphertext = concatBytes(hexToBytes(encryptedHex), authTag);
+  const decrypted = await crypto.subtle.decrypt({ name: ALGO, iv, tag: authTag }, key, ciphertext);
+  return bytesToString(decrypted);
+}
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const result = new Uint8Array(a.length + b.length);
+  result.set(a);
+  result.set(b, a.length);
+  return result;
+}
+
+function bytesToString(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes);
+}
+
+// Load data from data.json at startup
+export async function loadDb(path = "db/data.json"): Promise<DbData> {
+  const text = await Deno.readTextFile(path);
+  const data = JSON.parse(text) as DbData;
+  _encKey = hexToBytes(data.encryption_key);
+  _data = data;
+  console.log(`[db] loaded ${Object.keys(data.settings).length} settings, ${data.api_keys.length} api_keys`);
+  return data;
+}
+
+export function getDb(): DbData {
+  if (!_data) throw new Error("DB not loaded. Call loadDb() first.");
+  return _data;
+}
+
+export function getSetting(key: string): string | undefined {
+  return _data?.settings[key];
+}
+
+export function getAllEnabledKeys(): ApiKey[] {
+  return _data?.api_keys.filter((k) => k.enabled) ?? [];
+}
+
+export function getApiKeyById(id: number): ApiKey | undefined {
+  return _data?.api_keys.find((k) => k.id === id);
+}
+
+/** Decrypt an api_key's secret. Returns null if decrypt fails. */
+export async function decryptKeyValue(key: ApiKey): Promise<string | null> {
+  try {
+    return await decryptKey(key.encrypted_key, key.iv, key.auth_tag);
+  } catch {
+    return null;
+  }
+}
+
+/** Return the encryption key fingerprint (first 8 hex chars) for logging. */
+export function exportEncKeyFingerprint(): string {
+  if (!_encKey) return "(none)";
+  const hash = crypto.subtle.digest("SHA-256", _encKey);
+  return hash.then((buf) => bytesToHex(new Uint8Array(buf)).slice(0, 8));
+}
+
+/** Map platform name to its default base URL. */
+export function getBaseUrlForPlatform(platform: string): string {
+  const map: Record<string, string> = {
+    agnes: "https://apihub.agnes-ai.com/v1",
+    google: "https://generativelanguage.googleapis.com/v1beta",
+    groq: "https://api.groq.com",
+    openrouter: "https://openrouter.ai/api/v1",
+    zhipu: "https://open.bigmodel.cn/api/paas/v4",
+    radeon: "https://cloud.radeon.com/openai/v1",
+    nvidia: "https://integrate.api.nvidia.com/v1",
+    kilo: "https://api.kilo.com/v1",
+    sail: "https://api.sailresearch.com/v1",
+    openai: "https://api.openai.com/v1",
+  };
+  return map[platform] ?? `https://api.${platform}.com/v1`;
+}

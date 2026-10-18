@@ -1,0 +1,6 @@
+.env
+dist/
+dist.bak-*/
+db/data.json
+*.log
+.Deno

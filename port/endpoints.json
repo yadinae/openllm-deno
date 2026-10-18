@@ -1,0 +1,1028 @@
+[
+ {
+  "route_file": "analytics",
+  "line": 91,
+  "method": "GET",
+  "path": "/search"
+ },
+ {
+  "route_file": "analytics",
+  "line": 97,
+  "method": "GET",
+  "path": "/summary"
+ },
+ {
+  "route_file": "analytics",
+  "line": 238,
+  "method": "GET",
+  "path": "/by-model"
+ },
+ {
+  "route_file": "analytics",
+  "line": 300,
+  "method": "GET",
+  "path": "/by-platform"
+ },
+ {
+  "route_file": "analytics",
+  "line": 375,
+  "method": "GET",
+  "path": "/by-client"
+ },
+ {
+  "route_file": "analytics",
+  "line": 407,
+  "method": "GET",
+  "path": "/by-key"
+ },
+ {
+  "route_file": "analytics",
+  "line": 445,
+  "method": "GET",
+  "path": "/timeline"
+ },
+ {
+  "route_file": "analytics",
+  "line": 492,
+  "method": "GET",
+  "path": "/error-distribution"
+ },
+ {
+  "route_file": "analytics",
+  "line": 576,
+  "method": "GET",
+  "path": "/errors"
+ },
+ {
+  "route_file": "analytics",
+  "line": 613,
+  "method": "GET",
+  "path": "/requests"
+ },
+ {
+  "route_file": "analytics",
+  "line": 739,
+  "method": "GET",
+  "path": "/requests/:id"
+ },
+ {
+  "route_file": "anthropic",
+  "line": 455,
+  "method": "POST",
+  "path": "/messages"
+ },
+ {
+  "route_file": "anthropic",
+  "line": 1103,
+  "method": "POST",
+  "path": "/messages/count_tokens"
+ },
+ {
+  "route_file": "anthropic",
+  "line": 1142,
+  "method": "GET",
+  "path": "/models"
+ },
+ {
+  "route_file": "auth",
+  "line": 135,
+  "method": "GET",
+  "path": "/status"
+ },
+ {
+  "route_file": "auth",
+  "line": 146,
+  "method": "POST",
+  "path": "/setup"
+ },
+ {
+  "route_file": "auth",
+  "line": 179,
+  "method": "POST",
+  "path": "/login"
+ },
+ {
+  "route_file": "auth",
+  "line": 209,
+  "method": "POST",
+  "path": "/logout"
+ },
+ {
+  "route_file": "auth",
+  "line": 214,
+  "method": "GET",
+  "path": "/me"
+ },
+ {
+  "route_file": "auth",
+  "line": 229,
+  "method": "POST",
+  "path": "/change-email"
+ },
+ {
+  "route_file": "auth",
+  "line": 271,
+  "method": "POST",
+  "path": "/change-password"
+ },
+ {
+  "route_file": "auth",
+  "line": 302,
+  "method": "POST",
+  "path": "/forgot-password"
+ },
+ {
+  "route_file": "auth",
+  "line": 325,
+  "method": "POST",
+  "path": "/reset-password"
+ },
+ {
+  "route_file": "backups",
+  "line": 53,
+  "method": "GET",
+  "path": "/tables"
+ },
+ {
+  "route_file": "backups",
+  "line": 57,
+  "method": "GET",
+  "path": "/schedule"
+ },
+ {
+  "route_file": "backups",
+  "line": 61,
+  "method": "PUT",
+  "path": "/schedule"
+ },
+ {
+  "route_file": "backups",
+  "line": 78,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "backups",
+  "line": 84,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "backups",
+  "line": 98,
+  "method": "GET",
+  "path": "/:id/download"
+ },
+ {
+  "route_file": "backups",
+  "line": 112,
+  "method": "POST",
+  "path": "/:id/restore"
+ },
+ {
+  "route_file": "backups",
+  "line": 126,
+  "method": "DELETE",
+  "path": "/:id"
+ },
+ {
+  "route_file": "cache",
+  "line": 18,
+  "method": "GET",
+  "path": "/stats"
+ },
+ {
+  "route_file": "cache",
+  "line": 33,
+  "method": "PUT",
+  "path": "/config"
+ },
+ {
+  "route_file": "cache",
+  "line": 47,
+  "method": "DELETE",
+  "path": "/"
+ },
+ {
+  "route_file": "compression",
+  "line": 28,
+  "method": "GET",
+  "path": "/stats"
+ },
+ {
+  "route_file": "compression",
+  "line": 48,
+  "method": "POST",
+  "path": "/preview"
+ },
+ {
+  "route_file": "conversations",
+  "line": 175,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "conversations",
+  "line": 196,
+  "method": "GET",
+  "path": "/:id"
+ },
+ {
+  "route_file": "conversations",
+  "line": 204,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "conversations",
+  "line": 229,
+  "method": "PUT",
+  "path": "/:id"
+ },
+ {
+  "route_file": "conversations",
+  "line": 264,
+  "method": "DELETE",
+  "path": "/:id"
+ },
+ {
+  "route_file": "docs",
+  "line": 14,
+  "method": "GET",
+  "path": "/openapi.json"
+ },
+ {
+  "route_file": "docs",
+  "line": 20,
+  "method": "GET",
+  "path": "/docs"
+ },
+ {
+  "route_file": "embeddings",
+  "line": 20,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "embeddings",
+  "line": 85,
+  "method": "POST",
+  "path": "/custom"
+ },
+ {
+  "route_file": "embeddings",
+  "line": 183,
+  "method": "PUT",
+  "path": "/"
+ },
+ {
+  "route_file": "embeddings",
+  "line": 211,
+  "method": "DELETE",
+  "path": "/custom/:id"
+ },
+ {
+  "route_file": "embeddings",
+  "line": 246,
+  "method": "GET",
+  "path": "/usage"
+ },
+ {
+  "route_file": "fallback",
+  "line": 26,
+  "method": "GET",
+  "path": "/quota-forecast"
+ },
+ {
+  "route_file": "fallback",
+  "line": 33,
+  "method": "GET",
+  "path": "/routing"
+ },
+ {
+  "route_file": "fallback",
+  "line": 45,
+  "method": "GET",
+  "path": "/penalty-inspector"
+ },
+ {
+  "route_file": "fallback",
+  "line": 52,
+  "method": "DELETE",
+  "path": "/penalty-inspector"
+ },
+ {
+  "route_file": "fallback",
+  "line": 89,
+  "method": "PUT",
+  "path": "/routing"
+ },
+ {
+  "route_file": "fallback",
+  "line": 218,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "fallback",
+  "line": 347,
+  "method": "PUT",
+  "path": "/"
+ },
+ {
+  "route_file": "fallback",
+  "line": 404,
+  "method": "POST",
+  "path": "/sort/:preset"
+ },
+ {
+  "route_file": "fallback",
+  "line": 451,
+  "method": "GET",
+  "path": "/token-usage"
+ },
+ {
+  "route_file": "fallback",
+  "line": 591,
+  "method": "GET",
+  "path": "/rate-limit-usage"
+ },
+ {
+  "route_file": "gemini",
+  "line": 80,
+  "method": "GET",
+  "path": "/models"
+ },
+ {
+  "route_file": "health",
+  "line": 13,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "health",
+  "line": 64,
+  "method": "POST",
+  "path": "/check/:keyId"
+ },
+ {
+  "route_file": "health",
+  "line": 78,
+  "method": "POST",
+  "path": "/check-all"
+ },
+ {
+  "route_file": "health",
+  "line": 89,
+  "method": "POST",
+  "path": "/quota/:keyId"
+ },
+ {
+  "route_file": "keys",
+  "line": 300,
+  "method": "GET",
+  "path": "/providers"
+ },
+ {
+  "route_file": "keys",
+  "line": 343,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "keys",
+  "line": 475,
+  "method": "DELETE",
+  "path": "/:id/cooldowns"
+ },
+ {
+  "route_file": "keys",
+  "line": 520,
+  "method": "GET",
+  "path": "/export"
+ },
+ {
+  "route_file": "keys",
+  "line": 641,
+  "method": "POST",
+  "path": "/:id/reveal"
+ },
+ {
+  "route_file": "keys",
+  "line": 672,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "keys",
+  "line": 986,
+  "method": "POST",
+  "path": "/custom/discover-models"
+ },
+ {
+  "route_file": "keys",
+  "line": 1117,
+  "method": "POST",
+  "path": "/discovered-models"
+ },
+ {
+  "route_file": "keys",
+  "line": 1154,
+  "method": "POST",
+  "path": "/custom/probe"
+ },
+ {
+  "route_file": "keys",
+  "line": 1247,
+  "method": "POST",
+  "path": "/custom"
+ },
+ {
+  "route_file": "keys",
+  "line": 1432,
+  "method": "POST",
+  "path": "/import"
+ },
+ {
+  "route_file": "keys",
+  "line": 1528,
+  "method": "POST",
+  "path": "/preview"
+ },
+ {
+  "route_file": "keys",
+  "line": 1588,
+  "method": "POST",
+  "path": "/import-selected"
+ },
+ {
+  "route_file": "keys",
+  "line": 1680,
+  "method": "DELETE",
+  "path": "/:id"
+ },
+ {
+  "route_file": "keys",
+  "line": 1748,
+  "method": "PATCH",
+  "path": "/platform/:platform"
+ },
+ {
+  "route_file": "keys",
+  "line": 1782,
+  "method": "PATCH",
+  "path": "/:id"
+ },
+ {
+  "route_file": "logs",
+  "line": 56,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "logs",
+  "line": 103,
+  "method": "POST",
+  "path": "/clear"
+ },
+ {
+  "route_file": "mcp",
+  "line": 621,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "mcp",
+  "line": 645,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "mcp",
+  "line": 648,
+  "method": "DELETE",
+  "path": "/"
+ },
+ {
+  "route_file": "media",
+  "line": 16,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "media",
+  "line": 56,
+  "method": "GET",
+  "path": "/usage"
+ },
+ {
+  "route_file": "media",
+  "line": 118,
+  "method": "POST",
+  "path": "/custom"
+ },
+ {
+  "route_file": "media",
+  "line": 172,
+  "method": "PUT",
+  "path": "/:id"
+ },
+ {
+  "route_file": "media",
+  "line": 191,
+  "method": "DELETE",
+  "path": "/custom/:id"
+ },
+ {
+  "route_file": "models",
+  "line": 104,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "models",
+  "line": 220,
+  "method": "DELETE",
+  "path": "/custom/:id"
+ },
+ {
+  "route_file": "models",
+  "line": 248,
+  "method": "PATCH",
+  "path": "/:id"
+ },
+ {
+  "route_file": "models",
+  "line": 333,
+  "method": "DELETE",
+  "path": "/:id"
+ },
+ {
+  "route_file": "models",
+  "line": 366,
+  "method": "POST",
+  "path": "/:id/test"
+ },
+ {
+  "route_file": "models",
+  "line": 430,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "moderation",
+  "line": 25,
+  "method": "POST",
+  "path": "/moderations"
+ },
+ {
+  "route_file": "ollama",
+  "line": 96,
+  "method": "GET",
+  "path": "/api/tags"
+ },
+ {
+  "route_file": "ollama",
+  "line": 119,
+  "method": "GET",
+  "path": "/api/version"
+ },
+ {
+  "route_file": "ollama",
+  "line": 127,
+  "method": "POST",
+  "path": "/api/show"
+ },
+ {
+  "route_file": "ollama",
+  "line": 386,
+  "method": "POST",
+  "path": "/api/chat"
+ },
+ {
+  "route_file": "ollama",
+  "line": 501,
+  "method": "POST",
+  "path": "/api/generate"
+ },
+ {
+  "route_file": "ollama",
+  "line": 595,
+  "method": "POST",
+  "path": "/api/embed"
+ },
+ {
+  "route_file": "ollama",
+  "line": 602,
+  "method": "POST",
+  "path": "/api/embeddings"
+ },
+ {
+  "route_file": "premium",
+  "line": 35,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "premium",
+  "line": 45,
+  "method": "POST",
+  "path": "/key"
+ },
+ {
+  "route_file": "premium",
+  "line": 76,
+  "method": "DELETE",
+  "path": "/key"
+ },
+ {
+  "route_file": "premium",
+  "line": 86,
+  "method": "POST",
+  "path": "/sync"
+ },
+ {
+  "route_file": "premium",
+  "line": 97,
+  "method": "POST",
+  "path": "/portal"
+ },
+ {
+  "route_file": "profiles",
+  "line": 66,
+  "method": "GET",
+  "path": "/"
+ },
+ {
+  "route_file": "profiles",
+  "line": 77,
+  "method": "GET",
+  "path": "/active"
+ },
+ {
+  "route_file": "profiles",
+  "line": 85,
+  "method": "POST",
+  "path": "/active"
+ },
+ {
+  "route_file": "profiles",
+  "line": 109,
+  "method": "GET",
+  "path": "/:id/models"
+ },
+ {
+  "route_file": "profiles",
+  "line": 139,
+  "method": "POST",
+  "path": "/"
+ },
+ {
+  "route_file": "profiles",
+  "line": 207,
+  "method": "PUT",
+  "path": "/:id"
+ },
+ {
+  "route_file": "profiles",
+  "line": 281,
+  "method": "PUT",
+  "path": "/:id/reorder"
+ },
+ {
+  "route_file": "profiles",
+  "line": 309,
+  "method": "POST",
+  "path": "/:id/reset"
+ },
+ {
+  "route_file": "profiles",
+  "line": 348,
+  "method": "DELETE",
+  "path": "/:id"
+ },
+ {
+  "route_file": "profiles",
+  "line": 422,
+  "method": "POST",
+  "path": "/:id/sort/:preset"
+ },
+ {
+  "route_file": "proxy",
+  "line": 315,
+  "method": "GET",
+  "path": "/models"
+ },
+ {
+  "route_file": "proxy",
+  "line": 678,
+  "method": "POST",
+  "path": "/embeddings"
+ },
+ {
+  "route_file": "proxy",
+  "line": 713,
+  "method": "POST",
+  "path": "/rerank"
+ },
+ {
+  "route_file": "proxy",
+  "line": 753,
+  "method": "POST",
+  "path": "/search"
+ },
+ {
+  "route_file": "proxy",
+  "line": 797,
+  "method": "GET",
+  "path": "/search/engines"
+ },
+ {
+  "route_file": "proxy",
+  "line": 841,
+  "method": "POST",
+  "path": "/images/generations"
+ },
+ {
+  "route_file": "proxy",
+  "line": 879,
+  "method": "POST",
+  "path": "/videos/generations"
+ },
+ {
+  "route_file": "proxy",
+  "line": 935,
+  "method": "POST",
+  "path": "/audio/speech"
+ },
+ {
+  "route_file": "proxy",
+  "line": 984,
+  "method": "POST",
+  "path": "/audio/transcriptions"
+ },
+ {
+  "route_file": "proxy",
+  "line": 1148,
+  "method": "POST",
+  "path": "/completions"
+ },
+ {
+  "route_file": "proxy",
+  "line": 1565,
+  "method": "POST",
+  "path": "/chat/completions"
+ },
+ {
+  "route_file": "responses",
+  "line": 656,
+  "method": "POST",
+  "path": "/responses"
+ },
+ {
+  "route_file": "search",
+  "line": 11,
+  "method": "GET",
+  "path": "/engines"
+ },
+ {
+  "route_file": "search",
+  "line": 22,
+  "method": "PATCH",
+  "path": "/engines/:id"
+ },
+ {
+  "route_file": "settings",
+  "line": 43,
+  "method": "GET",
+  "path": "/version"
+ },
+ {
+  "route_file": "settings",
+  "line": 53,
+  "method": "GET",
+  "path": "/update-check"
+ },
+ {
+  "route_file": "settings",
+  "line": 57,
+  "method": "PUT",
+  "path": "/update-check"
+ },
+ {
+  "route_file": "settings",
+  "line": 72,
+  "method": "GET",
+  "path": "/compression"
+ },
+ {
+  "route_file": "settings",
+  "line": 76,
+  "method": "PUT",
+  "path": "/compression"
+ },
+ {
+  "route_file": "settings",
+  "line": 94,
+  "method": "GET",
+  "path": "/unify"
+ },
+ {
+  "route_file": "settings",
+  "line": 105,
+  "method": "PUT",
+  "path": "/unify"
+ },
+ {
+  "route_file": "settings",
+  "line": 118,
+  "method": "GET",
+  "path": "/fusion"
+ },
+ {
+  "route_file": "settings",
+  "line": 124,
+  "method": "PUT",
+  "path": "/fusion"
+ },
+ {
+  "route_file": "settings",
+  "line": 140,
+  "method": "GET",
+  "path": "/enable-mcp"
+ },
+ {
+  "route_file": "settings",
+  "line": 146,
+  "method": "PUT",
+  "path": "/enable-mcp"
+ },
+ {
+  "route_file": "settings",
+  "line": 159,
+  "method": "GET",
+  "path": "/anthropic-map"
+ },
+ {
+  "route_file": "settings",
+  "line": 165,
+  "method": "PUT",
+  "path": "/anthropic-map"
+ },
+ {
+  "route_file": "settings",
+  "line": 176,
+  "method": "GET",
+  "path": "/gemini-map"
+ },
+ {
+  "route_file": "settings",
+  "line": 180,
+  "method": "PUT",
+  "path": "/gemini-map"
+ },
+ {
+  "route_file": "settings",
+  "line": 196,
+  "method": "GET",
+  "path": "/agent-compatibility"
+ },
+ {
+  "route_file": "settings",
+  "line": 203,
+  "method": "PUT",
+  "path": "/agent-compatibility"
+ },
+ {
+  "route_file": "settings",
+  "line": 224,
+  "method": "GET",
+  "path": "/url-tokens"
+ },
+ {
+  "route_file": "settings",
+  "line": 228,
+  "method": "POST",
+  "path": "/url-tokens"
+ },
+ {
+  "route_file": "settings",
+  "line": 237,
+  "method": "DELETE",
+  "path": "/url-tokens/:id"
+ },
+ {
+  "route_file": "settings",
+  "line": 264,
+  "method": "GET",
+  "path": "/output-limit"
+ },
+ {
+  "route_file": "settings",
+  "line": 279,
+  "method": "PUT",
+  "path": "/output-limit"
+ },
+ {
+  "route_file": "settings",
+  "line": 295,
+  "method": "GET",
+  "path": "/guardrails"
+ },
+ {
+  "route_file": "settings",
+  "line": 310,
+  "method": "GET",
+  "path": "/headroom"
+ },
+ {
+  "route_file": "settings",
+  "line": 322,
+  "method": "PUT",
+  "path": "/headroom"
+ },
+ {
+  "route_file": "settings",
+  "line": 344,
+  "method": "GET",
+  "path": "/task-weight-share"
+ },
+ {
+  "route_file": "settings",
+  "line": 354,
+  "method": "PUT",
+  "path": "/task-weight-share"
+ },
+ {
+  "route_file": "settings",
+  "line": 372,
+  "method": "GET",
+  "path": "/min-reliability-floor"
+ },
+ {
+  "route_file": "settings",
+  "line": 382,
+  "method": "PUT",
+  "path": "/min-reliability-floor"
+ },
+ {
+  "route_file": "settings",
+  "line": 398,
+  "method": "PUT",
+  "path": "/guardrails"
+ },
+ {
+  "route_file": "settings",
+  "line": 418,
+  "method": "GET",
+  "path": "/api-key"
+ },
+ {
+  "route_file": "settings",
+  "line": 423,
+  "method": "POST",
+  "path": "/api-key/regenerate"
+ },
+ {
+  "route_file": "settings",
+  "line": 429,
+  "method": "GET",
+  "path": "/proxy"
+ },
+ {
+  "route_file": "settings",
+  "line": 460,
+  "method": "PUT",
+  "path": "/proxy"
+ },
+ {
+  "route_file": "settings",
+  "line": 578,
+  "method": "POST",
+  "path": "/proxy/test"
+ },
+ {
+  "route_file": "status",
+  "line": 41,
+  "method": "GET",
+  "path": "/livez"
+ },
+ {
+  "route_file": "status",
+  "line": 64,
+  "method": "GET",
+  "path": "/readyz"
+ },
+ {
+  "route_file": "status",
+  "line": 112,
+  "method": "GET",
+  "path": "/providers"
+ },
+ {
+  "route_file": "status",
+  "line": 221,
+  "method": "GET",
+  "path": "/quota-forecast"
+ }
+]
