@@ -44,7 +44,6 @@ const BASE_URLS: Record<string, string> = {
   zhipu: "https://open.bigmodel.cn/api/paas/v4",
   radeon: "https://cloud.radeon.com/openai/v1",
   nvidia: "https://integrate.api.nvidia.com/v1",
-  kilo: "https://api.kilo.com/v1",
   sail: "https://api.sailresearch.com/v1",
   openai: "https://api.openai.com/v1",
   ovh: "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
