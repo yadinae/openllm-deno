@@ -19,8 +19,29 @@ export interface ApiKey {
   base_url: string;
 }
 
-/** DbEntry is an alias for ApiKey used in pg.ts */
-export type DbEntry = ApiKey;
+/** DbEntry — raw DB row shape coming back from Postgres.
+ *  id is a string (Postgres/pg.js stringifies numeric ids); columns are nullable
+ *  (encrypted_key / base_url etc. are OPTIONAL on insert).
+ *  This is structurally identical to db/pg.ts's own DbEntry so api.ts — which
+ *  imports DbEntry from here but calls listApiKeys()/saveApiKey() from pg.ts —
+ *  type-checks without `as unknown as AnyKey[]` casts at every boundary.
+ *  NOTE: this used to be `type DbEntry = ApiKey` (id: number, non-null fields).
+ *  That alias was the lie causing 16 type errors — it described the *dashboard*
+ *  contract, not the row. See notes/2026-09-20-hardening-reverted-by-migration
+ *  for the same "interface ≠ runtime" class of bug.
+ */
+export interface DbEntry {
+  id: string;          // Platform name (e.g., "groq") - used for provider registry lookup
+  db_id: number;       // Database integer ID - used for quota/rate limiting
+  platform: string;
+  label?: string;
+  encrypted_key?: string;
+  iv?: string;
+  auth_tag?: string;
+  status?: string;
+  enabled: boolean;
+  base_url?: string;
+}
 
 export interface DiscoveredModel {
   id: string;
@@ -71,11 +92,6 @@ function toBufferSource(bytes: Uint8Array): ArrayBuffer {
   return new Uint8Array(bytes).buffer;
 }
 
-async function deriveKey(hexKey: string): Promise<CryptoKey> {
-  const raw = hexToBytes(hexKey);
-  return crypto.subtle.importKey("raw", toBufferSource(raw), { name: ALGO, length: 256 }, false, ["encrypt", "decrypt"]);
-}
-
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
@@ -111,18 +127,47 @@ function bytesToString(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
-// Load data from data.json at startup
+/** An empty in-memory DB used when data.json is unavailable. Postgres is the
+ *  source of truth in that case; this keeps getDb()/middleware from throwing. */
+function emptyDb(): DbData {
+  return { encryption_key: "", settings: {}, api_keys: [], discovered_models: [] };
+}
+
+/** Point the crypto layer at a raw hex AES-256 key (also used to source the key
+ *  from Postgres/ENCRYPTION_KEY when no data.json is shipped). */
+export function setEncryptionKey(hex: string): void {
+  _encKey = hex ? hexToBytes(hex) : null;
+}
+
+export function hasEncryptionKey(): boolean {
+  return _encKey !== null;
+}
+
+// Load data from data.json at startup. Missing/invalid file is NOT fatal:
+// the deploy artifact excludes db/data.json (see .gitignore), so on Deno Deploy
+// this degrades to an empty in-memory DB and Postgres becomes the source of truth.
 export async function loadDb(path = "db/data.json"): Promise<DbData> {
-  const text = await Deno.readTextFile(path);
-  const data = JSON.parse(text) as DbData;
-  _encKey = hexToBytes(data.encryption_key);
-  _data = data;
-  console.log(`[db] loaded ${Object.keys(data.settings).length} settings, ${data.api_keys.length} api_keys`);
-  return data;
+  try {
+    const text = await Deno.readTextFile(path);
+    const data = JSON.parse(text) as DbData;
+    _encKey = data.encryption_key ? hexToBytes(data.encryption_key) : null;
+    _data = data;
+    console.log(`[db] loaded ${Object.keys(data.settings ?? {}).length} settings, ${(data.api_keys ?? []).length} api_keys from ${path}`);
+    return data;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    console.log(`[db] ${path} unavailable (${reason}) — starting with empty in-memory DB; Postgres is the source of truth`);
+    _encKey = null;
+    _data = emptyDb();
+    return _data;
+  }
 }
 
 export function getDb(): DbData {
-  if (!_data) throw new Error("DB not loaded. Call loadDb() first.");
+  if (!_data) {
+    console.warn("[db] getDb() called before loadDb() — using empty in-memory DB");
+    _data = emptyDb();
+  }
   return _data;
 }
 
@@ -370,21 +415,4 @@ function pemToDer(pem: string): Uint8Array {
  return bytes;
 }
 
-/** 从Base64字符串创建Uint8Array */
-function base64ToUint8Array(base64: string): Uint8Array {
- const binary = atob(base64);
- const bytes = new Uint8Array(binary.length);
- for (let i = 0; i < binary.length; i++) {
-   bytes[i] = binary.charCodeAt(i);
- }
- return bytes;
-}
 
-/** 从HEX字符串创建Uint8Array */
-function hexToUint8Array(hex: string): Uint8Array {
- const bytes = new Uint8Array(hex.length / 2);
- for (let i = 0; i < hex.length; i += 2) {
-   bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
- }
- return bytes;
-}

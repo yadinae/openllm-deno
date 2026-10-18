@@ -211,7 +211,7 @@ function setCachedDiscovery(platform: string, models: DiscoveredModel[]): void {
   console.log(`[discover-cache] ${platform}: cached ${models.length} models`);
 }
 
-function clearDiscoveryCache(platform?: string): void {
+export function clearDiscoveryCache(platform?: string): void {
   if (platform) {
     discoveryCache.delete(platform);
     console.log(`[discover-cache] ${platform}: cache cleared`);

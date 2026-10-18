@@ -11,8 +11,39 @@
     "entrypoint": "main.ts",
     "org": "yadinae",
     "app": "openllm"
+  },
+  "tasks": {
+    "deploy": "deno run -A scripts/deploy.ts"
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

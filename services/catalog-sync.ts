@@ -7,7 +7,7 @@
  * installs still self-heal, just on a slower cadence.
  */
 
-import { getDb, getSetting, setSetting, getLicenseKey, getLicenseStatus, setLicenseStatus, getAppliedVersion, setAppliedVersion, getAppliedTier, setAppliedTier, getAppliedJson, setAppliedJson, getLastSyncMs, setLastSyncMs, getLastError, setLastError, verifyEd25519Signature, PINNED_CATALOG_PUBKEY, getBaseUrlForPlatform } from "../db/mod.ts";
+import { getLicenseKey, getLicenseStatus, setLicenseStatus, getAppliedVersion, setAppliedVersion, getAppliedTier, setAppliedTier, setAppliedJson, getLastSyncMs, setLastSyncMs, getLastError, setLastError, PINNED_CATALOG_PUBKEY } from "../db/mod.ts";
 
 export const SETTING_LICENSE_KEY = 'premium_license_key';
 export const SETTING_LICENSE_STATUS = 'premium_license_status';
@@ -81,13 +81,12 @@ export function getCachedLicenseStatus(): LicenseStatus | null {
  * 从设置中获取同步状态
  */
 export function getSyncState(): CatalogSyncState {
-  const db = getDb();
   return {
     baseUrl: catalogBaseUrl(),
-    appliedVersion: getAppliedVersion(),
-    appliedTier: getAppliedTier(),
-    lastSyncMs: getLastSyncMs(),
-    lastError: getLastError()
+    appliedVersion: getAppliedVersion() ?? null,
+    appliedTier: getAppliedTier() ?? null,
+    lastSyncMs: getLastSyncMs() ?? null,
+    lastError: getLastError() ?? null
   };
 }
 
@@ -200,7 +199,7 @@ export async function syncCatalog(force: boolean = false): Promise<{ success: bo
     }
 
     // 获取目录内容和签名
-    const catalogData = await res.json();
+    const catalogData = await res.json() as Record<string, unknown>;
     
     // 检查响应中是否包含签名
     // 实际的FreeLLMAPI可能在响应头或特定字段中返回签名
@@ -211,8 +210,8 @@ export async function syncCatalog(force: boolean = false): Promise<{ success: bo
     // 在实际生产环境中，这里应该添加Ed25519签名验证
     
     // 应用目录
-    setAppliedVersion(catalogData.version);
-    setAppliedTier(catalogData.tier);
+    setAppliedVersion(catalogData.version == null ? null : String(catalogData.version));
+    setAppliedTier(catalogData.tier == null ? null : String(catalogData.tier));
     setAppliedJson(JSON.stringify(catalogData));
     setLastSyncMs(Date.now());
     setLastError(null);

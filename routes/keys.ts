@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
-import { getDb } from '../db/mod.ts';
 import type { DbData } from '../db/mod.ts';
 
-export const keysRouter = new Hono();
+export const keysRouter = new Hono<{ Variables: { db: DbData } }>();
 
 // GET /api/keys - List all keys with masked values
 keysRouter.get('/', async (c) => {
-  const db = c.get('db') as DbData;
+  const db = c.get('db');
   const keys = db.api_keys.map((k) => ({
     id: k.id,
     platform: k.platform,

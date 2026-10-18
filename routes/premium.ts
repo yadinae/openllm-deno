@@ -3,8 +3,8 @@
  */
 
 import { Hono } from 'hono';
-import { getLicenseKey, getLicenseStatus, setLicenseStatus, setLicenseKey, getAppliedVersion, getAppliedTier, getAppliedJson, getLastSyncMs, getLastError } from '../db/mod.ts';
-import { validateLicenseKey, refreshLicenseStatus, syncCatalog, catalogBaseUrl, getCachedLicenseStatus, getSyncState } from '../services/catalog-sync.ts';
+import { getLicenseKey, getLicenseStatus, setLicenseStatus, setLicenseKey } from '../db/mod.ts';
+import { validateLicenseKey, refreshLicenseStatus, syncCatalog, catalogBaseUrl, getSyncState } from '../services/catalog-sync.ts';
 
 export const premiumRouter = new Hono();
 
@@ -26,9 +26,7 @@ function statusPayload() {
 }
 
 /** GET /api/premium — everything the Premium page renders. */
-premiumRouter.get('/', (_req, res) => {
-  res.json(statusPayload());
-});
+premiumRouter.get('/', (c) => c.json(statusPayload()));
 
 /**
  * POST /api/premium/key { key } — activate a license key.
@@ -36,19 +34,17 @@ premiumRouter.get('/', (_req, res) => {
  * is stored. A live-tier sync is kicked off right away so the upgrade is
  * visible within seconds, not at the next 12h poll.
  */
-premiumRouter.post('/key', async (req, res) => {
-  const body = await req.json();
+premiumRouter.post('/key', async (c) => {
+  const body = await c.req.json() as { key?: string };
   const key = typeof body.key === 'string' ? body.key.trim() : '';
 
   if (key.length < 8) {
-    res.status(400).json({ error: 'Enter the license key from your purchase email.' });
-    return;
+    return c.json({ error: 'Enter the license key from your purchase email.' }, 400);
   }
 
   const result = await validateLicenseKey(key, 15000);
   if (!result) {
-    res.status(502).json({ error: 'Could not reach the license service. Check your connection and try again.' });
-    return;
+    return c.json({ error: 'Could not reach the license service. Check your connection and try again.' }, 502);
   }
 
   if (!result.valid) {
@@ -58,21 +54,17 @@ premiumRouter.post('/key', async (req, res) => {
       canceled: 'That subscription was canceled. Re-subscribe on the website to reactivate.',
       refunded: 'That purchase was refunded, so the key is no longer active.',
     };
-    res.status(400).json({ error: reasons[result.reason ?? ''] ?? 'That key is not active.' });
-    return;
+    return c.json({ error: reasons[result.reason ?? ''] ?? 'That key is not active.' }, 400);
   }
 
   setLicenseKey(key);
   await refreshLicenseStatus();
   const sync = await syncCatalog(true);
-  res.json({ ...statusPayload(), sync });
+  return c.json({ ...statusPayload(), sync });
 });
 
 /** DELETE /api/premium/key — deactivate locally (the purchase itself is untouched). */
-premiumRouter.delete('/key', async (_req, res) => {
-  const db = getDb();
-  // 在实际的FreeLLMAPI中，这里会删除设置中的许可证相关条目
-  // 由于我们的实现略有不同，这里我们模拟这个行为
+premiumRouter.delete('/key', (c) => {
   setLicenseKey('');
   setLicenseStatus({
     valid: false,
@@ -80,24 +72,23 @@ premiumRouter.delete('/key', async (_req, res) => {
     status: null,
     expiresAt: null,
     cancelAtPeriodEnd: false,
-    reason: null,
     checkedAtMs: Date.now()
   });
-  
+
   // Drop back to the free tier in the background; failure just means the next
   // scheduled poll handles it.
   setTimeout(() => {
     syncCatalog(true);
   }, 0);
-  
-  res.json(statusPayload());
+
+  return c.json(statusPayload());
 });
 
 /** POST /api/premium/sync — manual "check for updates now" */
-premiumRouter.post('/sync', async (_req, res) => {
+premiumRouter.post('/sync', async (c) => {
   await refreshLicenseStatus();
   const sync = await syncCatalog(true);
-  res.json({ ...statusPayload(), sync });
+  return c.json({ ...statusPayload(), sync });
 });
 
 /**
@@ -105,13 +96,12 @@ premiumRouter.post('/sync', async (_req, res) => {
  * This is how an annual subscriber cancels, updates a card, or pulls invoices,
  * entirely self-serve.
  */
-premiumRouter.post('/portal', async (_req, res) => {
+premiumRouter.post('/portal', async (c) => {
   const key = getLicenseKey();
   if (!key) {
-    res.status(400).json({ error: 'No license key configured.' });
-    return;
+    return c.json({ error: 'No license key configured.' }, 400);
   }
-  
+
   try {
     const r = await fetch(`${catalogBaseUrl()}/v1/portal`, {
       method: 'POST',
@@ -119,15 +109,14 @@ premiumRouter.post('/portal', async (_req, res) => {
       body: JSON.stringify({ key }),
       signal: AbortSignal.timeout(15000)
     });
-    
-    const body = await r.json();
+
+    const body = await r.json() as { url?: string; error?: string };
     if (!r.ok || !body.url) {
-      res.status(502).json({ error: body.error ?? 'Could not open the billing portal.' });
-      return;
+      return c.json({ error: body.error ?? 'Could not open the billing portal.' }, 502);
     }
-    
-    res.json({ url: body.url });
+
+    return c.json({ url: body.url });
   } catch {
-    res.status(502).json({ error: 'Could not reach the billing service. Try again shortly.' });
+    return c.json({ error: 'Could not reach the billing service. Try again shortly.' }, 502);
   }
 });
