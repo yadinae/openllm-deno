@@ -4,4 +4,5 @@
 
 | 日期 | 主题 | 类型 | 文件 |
 |---|---|---|---|
+| 2026-10-18 | 线上仍是缺端点的旧 revision，24 个 GET 打 404 | 踩坑/风险 | [2026-10-18-live-revision-missing-24-endpoints.md](2026-10-18-live-revision-missing-24-endpoints.md) |
 | 2026-10-17 | 重写 routes/api.ts 误删 Phase 0-5 端点 | 踩坑/决策 | [2026-10-17-rewrite-api-ts-deleted-phase0-5.md](2026-10-17-rewrite-api-ts-deleted-phase0-5.md) |
