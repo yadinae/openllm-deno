@@ -183,6 +183,12 @@ api.patch("/keys/:idOrPlatform", async (c) => {
   if (!platform) return err(c, 404, "key not found");
   const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
   const entry = (await listApiKeys()).find(e => e.platform === platform)!;
+  // Update secret if provided (SPA sends keyValue for edits)
+  const secret = pickSecret(body);
+  if (secret) {
+    const enc = await encryptKey(secret);
+    entry.encrypted_key = enc.encrypted; entry.iv = enc.iv; entry.auth_tag = enc.authTag;
+  }
   if (typeof body.enabled === "boolean") entry.enabled = body.enabled;
   const label = body.label ?? body.displayName;
   if (typeof label === "string") entry.label = label;
