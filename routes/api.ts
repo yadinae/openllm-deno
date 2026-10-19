@@ -3,7 +3,7 @@
  */
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
-import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query } from "../db/pg.ts";
+import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel } from "../db/pg.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 
@@ -267,7 +267,8 @@ api.get("/keys/platform/custom", async (c) => {
 
 // ── Phase 2: Models ───────────────────────────────────────────────────────────
 api.get("/models", async (c) => {
-  const models = await getDiscoveredModels();
+  // Return catalog models (the editable model registry)
+  const models = await listCatalogModels();
 
   // Enrich with keyCount from enabled keys per platform (SPA filters keyCount > 0)
   const keys = await listApiKeys();
@@ -287,9 +288,8 @@ api.get("/models", async (c) => {
 });
 
 api.get("/models/free", async (c) => {
-  const models = await getDiscoveredModels();
-
-  // Enrich with keyCount from enabled keys per platform
+  const models = await listCatalogModels();
+  // "free" = models with no published paid pricing
   const keys = await listApiKeys();
   const enabledKeysByPlatform = new Map<string, number>();
   for (const k of keys) {
@@ -297,15 +297,32 @@ api.get("/models/free", async (c) => {
       enabledKeysByPlatform.set(k.platform, (enabledKeysByPlatform.get(k.platform) ?? 0) + 1);
     }
   }
-
   const enriched = models
-    .filter(m => m.isFree)
+    .filter(m => m.source === "catalog" || m.source === "discovered")
     .map(m => ({
       ...m,
       keyCount: m.platform ? (enabledKeysByPlatform.get(m.platform) ?? 0) : 0,
     }));
-
   return c.json(enriched);
+});
+
+/** PATCH /api/models/:id — update catalog model settings (SPA edit dialog) */
+api.patch("/models/:id", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const patch = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+  const model = await patchCatalogModel(id, patch);
+  if (!model) return err(c, 404, "model not found");
+  return c.json(model);
+});
+
+/** DELETE /api/models/:id — remove a catalog model */
+api.delete("/models/:id", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const ok = await deleteCatalogModel(id);
+  if (!ok) return err(c, 404, "model not found");
+  return c.json({ ok: true });
 });
 
 api.post("/models", async (c) => {

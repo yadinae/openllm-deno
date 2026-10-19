@@ -828,6 +828,162 @@ export async function isFreshDiscovery(platform: string): Promise<boolean> {
   return Date.now() - t < 24 * 60 * 60 * 1000;
 }
 
+// ---------------- Catalog models (models table) ----------------
+
+export interface CatalogModel {
+  modelDbId: number;
+  modelId: string;
+  platform: string;
+  displayName: string;
+  intelligenceRank: number;
+  speedRank: number;
+  sizeLabel: string;
+  rpmLimit: number | null;
+  rpdLimit: number | null;
+  tpmLimit: number | null;
+  tpdLimit: number | null;
+  contextWindow: number | null;
+  supportsVision: boolean;
+  supportsTools: boolean;
+  enabled: boolean;
+  source: string;
+  overrideFields: string[];
+  hasOverrides: boolean;
+}
+
+export async function listCatalogModels(): Promise<CatalogModel[]> {
+  const sql = await db();
+  if (!sql) return [];
+  const rows = await sql`SELECT * FROM models ORDER BY platform, model_id` as any[];
+  if (!rows.length) return [];
+
+  // Load overrides
+  const overrides = await sql`SELECT platform, model_id, overrides_json FROM model_overrides` as Array<{ platform: string; model_id: string; overrides_json: string }>;
+  const overridesMap = new Map<string, Record<string, unknown>>();
+  for (const o of overrides) {
+    overridesMap.set(`${o.platform}||${o.model_id}`, typeof o.overrides_json === "string" ? JSON.parse(o.overrides_json) : o.overrides_json);
+  }
+
+  return rows.map((r) => {
+    const key = `${r.platform}||${r.model_id}`;
+    const ov = overridesMap.get(key) ?? {};
+    const overrideFields: string[] = [];
+    const fieldMap: Record<string, string> = {
+      display_name: "displayName",
+      context_window: "contextWindow",
+      intelligence_rank: "intelligenceRank",
+      speed_rank: "speedRank",
+      size_label: "sizeLabel",
+      rpm_limit: "rpmLimit",
+      rpd_limit: "rpdLimit",
+      tpm_limit: "tpmLimit",
+      tpd_limit: "tpdLimit",
+      supports_vision: "supportsVision",
+      supports_tools: "supportsTools",
+    };
+    for (const [dbField, apiField] of Object.entries(fieldMap)) {
+      if (apiField in ov) overrideFields.push(apiField);
+    }
+    return {
+      modelDbId: Number(r.id),
+      modelId: String(r.model_id),
+      platform: String(r.platform),
+      displayName: String(r.display_name),
+      intelligenceRank: Number(r.intelligence_rank),
+      speedRank: Number(r.speed_rank),
+      sizeLabel: String(r.size_label ?? ""),
+      rpmLimit: r.rpm_limit == null ? null : Number(r.rpm_limit),
+      rpdLimit: r.rpd_limit == null ? null : Number(r.rpd_limit),
+      tpmLimit: r.tpm_limit == null ? null : Number(r.tpm_limit),
+      tpdLimit: r.tpd_limit == null ? null : Number(r.tpd_limit),
+      contextWindow: r.context_window == null ? null : Number(r.context_window),
+      supportsVision: Boolean(r.supports_vision),
+      supportsTools: Boolean(r.supports_tools),
+      enabled: Boolean(r.enabled),
+      source: String(r.source ?? "catalog"),
+      overrideFields,
+      hasOverrides: overrideFields.length > 0,
+      ...(Object.fromEntries(overrideFields.map(f => [f, ov[f]])) as Record<string, unknown>),
+    };
+  });
+}
+
+export async function patchCatalogModel(modelDbId: number, patch: Record<string, unknown>): Promise<CatalogModel | null> {
+  const sql = await db();
+  if (!sql) return null;
+
+  // Check model exists
+  const existing = await sql`SELECT * FROM models WHERE id = ${modelDbId}` as any[];
+  if (!existing.length) return null;
+  const row = existing[0];
+
+  // Build update set from patch fields
+  const updates: Record<string, unknown> = {};
+  const fieldMap: Record<string, string> = {
+    displayName: "display_name",
+    contextWindow: "context_window",
+    intelligenceRank: "intelligence_rank",
+    speedRank: "speed_rank",
+    sizeLabel: "size_label",
+    rpmLimit: "rpm_limit",
+    rpdLimit: "rpd_limit",
+    tpmLimit: "tpm_limit",
+    tpdLimit: "tpd_limit",
+    supportsVision: "supports_vision",
+    supportsTools: "supports_tools",
+    enabled: "enabled",
+  };
+  const boolFields = new Set(["supportsVision", "supportsTools", "enabled"]);
+  const intFields = new Set(["contextWindow", "rpmLimit", "rpdLimit", "tpmLimit", "tpdLimit", "intelligenceRank", "speedRank"]);
+
+  for (const [apiField, dbField] of Object.entries(fieldMap)) {
+    if (!(apiField in patch)) continue;
+    const val = patch[apiField];
+    if (val === null || val === undefined) continue;
+    if (boolFields.has(apiField)) {
+      updates[dbField] = val ? 1 : 0;
+    } else if (intFields.has(apiField)) {
+      updates[dbField] = val === "" ? null : Number(val);
+    } else {
+      updates[dbField] = String(val);
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return await getCatalogModelById(modelDbId);
+  }
+
+  // Build parameterized UPDATE
+  const sets = Object.entries(updates).map(([k], i) => `${k} = $${i + 2}`);
+  const values = Object.values(updates) as any[];
+  await sql.unsafe(`UPDATE models SET ${sets.join(", ")} WHERE id = $1`, [modelDbId, ...values]);
+
+  // Re-fetch and compute overrideFields based on original catalog values
+  const updated = await getCatalogModelById(modelDbId);
+  if (!updated) return null;
+
+  // overrideFields = patch keys that were actually applied
+  const appliedFields = Object.keys(patch).filter(k => k in fieldMap);
+  return { ...updated, overrideFields: appliedFields, hasOverrides: appliedFields.length > 0 };
+}
+
+export async function getCatalogModelById(modelDbId: number): Promise<CatalogModel | null> {
+  const sql = await db();
+  if (!sql) return null;
+  const rows = await sql`SELECT * FROM models WHERE id = ${modelDbId}` as any[];
+  if (!rows.length) return null;
+  // Reuse listCatalogModels logic for one row
+  const all = await listCatalogModels();
+  return all.find(m => m.modelDbId === modelDbId) ?? null;
+}
+
+export async function deleteCatalogModel(modelDbId: number): Promise<boolean> {
+  const sql = await db();
+  if (!sql) return false;
+  const result = await sql`DELETE FROM models WHERE id = ${modelDbId}`;
+  return (result as any)?.rowCount > 0;
+}
+
 // ---------------- Settings ----------------
 
 export async function saveSetting(key: string, value: unknown): Promise<void> {
