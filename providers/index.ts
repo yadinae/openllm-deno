@@ -20,6 +20,7 @@ import type {
 import { OpenAICompatAdapter } from "./openai-compat.ts";
 import { AnthropicAdapter } from "./anthropic.ts";
 import { GeminiAdapter } from "./gemini.ts";
+import { OllamaAdapter } from "./ollama.ts";
 import { OpencodeAdapter, OPencode_KEYED_CONFIG, OPencode_ANONYMOUS_CONFIG } from "./opencode.ts";
 import { quotaEngine, checkQuotaAndCooldown } from "../services/ratelimit.ts";
 
@@ -706,6 +707,24 @@ export const BUILTIN_PROVIDERS: ProviderConfig[] = [
   // Anonymous access uses "Bearer public" with proper headers
   OPencode_KEYED_CONFIG,
   OPencode_ANONYMOUS_CONFIG,
+
+  // Ollama (local/remote) — OpenAI-compatible via translation adapter
+  {
+    id: "ollama",
+    name: "Ollama",
+    protocol: "custom",
+    base_url: "http://localhost:11434", // Default local; can be overridden per-key
+    default_model: "llama3.1",
+    capabilities: {
+      streaming: true,
+      tools: false,
+      vision: false,
+      reasoning: false,
+      max_context: 131072,
+      pricing: { input_per_1k: 0, output_per_1k: 0, currency: "USD", updated_at: new Date().toISOString() },
+      supported_models: ["llama3.1", "llama3.2", "mistral", "codellama", "phi3"],
+    },
+  },
 ];
 
 /** Initialize registry with built-in providers */
@@ -725,6 +744,9 @@ export function initializeRegistry(): void {
           break;
         case "gemini":
           adapter = new GeminiAdapter(config);
+          break;
+        case "ollama":
+          adapter = new OllamaAdapter(config);
           break;
         default:
           adapter = new OpenAICompatAdapter(config);

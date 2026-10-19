@@ -27,6 +27,9 @@ import embeddingsRouter from "./routes/embeddings.ts";
 import mediaRouter from "./routes/media.ts";
 import rerankRouter from "./routes/rerank.ts";
 import ollamaRouter from "./routes/ollama.ts";
+// P2
+import transcriptionRouter from "./routes/transcriptions.ts";
+import analyticsRouter from "./routes/analytics.ts";
 import {
   initDb as initPg,
   listApiKeys,
@@ -177,6 +180,10 @@ app.route("/v1", rerankRouter);         // /v1/rerank
 
 // Ollama inbound (mounted at /v1/ollama for API key auth)
 app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api/chat, etc.
+
+app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
+
+app.route("/api/analytics", analyticsRouter); // /api/analytics/*
 
 // ── Dashboard API (contract-compliant layer) ─────────────────────────────────
 
