@@ -3,7 +3,7 @@
  */
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
-import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel } from "../db/pg.ts";
+import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel, type CatalogModel } from "../db/pg.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 
@@ -366,11 +366,22 @@ api.get("/fallback", async (c) => {
     }
   }
 
+  // Load catalog models to enrich fallback entries with displayName and other metadata
+  const catalogModels = await listCatalogModels();
+  const catalogByKey = new Map<string, CatalogModel>();
+  for (const m of catalogModels) {
+    catalogByKey.set(`${m.platform}||${m.modelId}`, m);
+  }
+
   const enriched = rawChain.map((entry: unknown, idx: number) => {
     const e = entry as Record<string, unknown>;
     const platform = String(e.platform ?? e.provider ?? "");
     const modelId = String(e.modelId ?? e.model_id ?? e.id ?? `model-${idx}`);
     const keyCount = platform ? (enabledKeysByPlatform.get(platform) ?? 0) : 0;
+
+    // Enrich with catalog model data (displayName, intelligenceRank, speedRank, sizeLabel, etc.)
+    const catalogModel = catalogByKey.get(`${platform}||${modelId}`);
+
     return {
       ...e,
       // SPA-required fields for filtering & rendering
@@ -381,6 +392,24 @@ api.get("/fallback", async (c) => {
       keyCount,
       keyLabel: e.keyLabel ?? (platform ? (keys.find(k => k.platform === platform)?.label ?? platform) : ""),
       priority: typeof e.priority === "number" ? e.priority : idx + 1,
+      // Enriched catalog fields
+      displayName: catalogModel?.displayName ?? modelId,
+      intelligenceRank: catalogModel?.intelligenceRank ?? 999,
+      speedRank: catalogModel?.speedRank ?? 999,
+      sizeLabel: catalogModel?.sizeLabel ?? "",
+      rpmLimit: catalogModel?.rpmLimit ?? null,
+      rpdLimit: catalogModel?.rpdLimit ?? null,
+      tpmLimit: catalogModel?.tpmLimit ?? null,
+      tpdLimit: catalogModel?.tpdLimit ?? null,
+      contextWindow: catalogModel?.contextWindow ?? null,
+      supportsVision: catalogModel?.supportsVision ?? false,
+      supportsTools: catalogModel?.supportsTools ?? false,
+      source: catalogModel?.source ?? "catalog",
+      overrideFields: catalogModel?.overrideFields ?? [],
+      hasOverrides: catalogModel?.hasOverrides ?? false,
+      groupKey: catalogModel?.modelDbId ? `grp:${catalogModel.modelDbId}` : undefined,
+      groupLabel: catalogModel?.displayName,
+      canonicalId: catalogModel?.modelId,
     };
   });
 
