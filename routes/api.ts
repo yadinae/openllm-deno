@@ -3,7 +3,7 @@
  */
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
-import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel } from "../db/pg.ts";
+import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query } from "../db/pg.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 
@@ -541,6 +541,74 @@ api.post("/scan", async (c) => {
 
 api.post("/keys/scan", async (c) => {
   return c.json({ ok: true });
+});
+
+/** Real probe endpoint — decrypts key, runs a light provider test, updates status. */
+api.post("/keys/:idOrPlatform/probe", async (c) => {
+  const platform = await resolvePlatform(c.req.param("idOrPlatform"));
+  if (!platform) return err(c, 404, "key not found");
+  const allKeys = await listApiKeys();
+  const entry = allKeys.find(e => e.platform === platform);
+  if (!entry) return err(c, 404, "key not found");
+  const { decryptKeyValue } = await import("../db/mod.ts");
+  const plain = await decryptKeyValue(entry as never);
+  if (plain === null) return err(c, 400, "key cannot be decrypted (missing encryption key?)");
+
+  const { providerRegistry, initializeRegistry, testProvider } = await import("../providers/index.ts");
+  initializeRegistry();
+  const testKey = {
+    id: String(entry.db_id),
+    platform: entry.platform,
+    label: entry.label ?? entry.platform,
+    encrypted_key: plain,
+    iv: "",
+    auth_tag: "",
+    status: entry.status ?? "healthy",
+    enabled: entry.enabled,
+    base_url: entry.base_url ?? "",
+    monthly_request_cap: entry.monthly_request_cap ?? 0,
+    monthly_token_cap: entry.monthly_token_cap ?? 0,
+    db_id: entry.db_id,
+  };
+  const adapter = providerRegistry.get(platform);
+  let ok = false;
+  let error: string | null = null;
+  let latency_ms = 0;
+
+  if (adapter) {
+    const t0 = Date.now();
+    // Prefer models() listing (lightweight) over chat test
+    try {
+      const models = await adapter.models();
+      latency_ms = Date.now() - t0;
+      ok = models.length > 0;
+      if (!ok) error = "provider returned 0 models";
+    } catch (e: any) {
+      latency_ms = Date.now() - t0;
+      error = e instanceof Error ? e.message : String(e);
+    }
+    // Fallback: try a minimal chat if models() didn't work
+    if (!ok && adapter.chat) {
+      try {
+        const chatResult = await adapter.chat({
+          model: "nvidia/meta/llama-3.3-70b-instruct",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 3,
+        }, testKey as never, { timeout_ms: 8_000 });
+        latency_ms = Date.now() - t0;
+        ok = !chatResult.error;
+        if (!ok) error = chatResult.error ?? "chat failed";
+      } catch { /* ignore */ }
+    }
+  } else {
+    error = `Provider ${platform} not registered`;
+  }
+
+  const newStatus = ok ? "healthy" : "error";
+  if (newStatus !== entry.status) {
+    await query`UPDATE api_keys SET status = ${newStatus}, updated_at = now() WHERE id = ${entry.db_id}`;
+  }
+  return c.json({ ok, status: newStatus, latency_ms, error });
 });
 
 api.post("/keys/mass-disable", async (c) => {
