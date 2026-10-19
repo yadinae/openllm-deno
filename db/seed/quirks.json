@@ -1,0 +1,1541 @@
+[
+ {
+  "id": 3233,
+  "slug": "cloudflare-key-format",
+  "title": "Key is account_id:token",
+  "body": "Cloudflare Workers AI authenticates with a combined credential in the form \"account_id:token\", not a bare token.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "cloudflare",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3234,
+  "slug": "keyless-anonymous",
+  "title": "No API key required",
+  "body": "Routes anonymously — the catalog ships a keyless sentinel row and calls work with no account or key.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "kilo",
+    "model_glob": null
+   },
+   {
+    "platform": "llm7",
+    "model_glob": null
+   },
+   {
+    "platform": "ovh",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3235,
+  "slug": "nvidia-rate-limited",
+  "title": "Recurring free, 40 RPM, eval-only ToS",
+  "body": "NVIDIA NIM replaced its depleting trial credits with a recurring per-account rate limit (40 RPM default, varies by model), verified June 2026. The trial ToS still scopes usage to evaluation/prototyping, not production.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nvidia",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3236,
+  "slug": "or-free-cap-account-wide",
+  "title": "Daily :free cap is account-wide",
+  "body": "OpenRouter’s :free daily cap (50/day, or 1000/day once you have ever bought $10 of credits) is shared across ALL :free models on the account, not per model. Per-row rpd values here are therefore optimistic; the router’s cooldown handling absorbs the shared 429s.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "openrouter",
+    "model_glob": "*:free"
+   }
+  ]
+ },
+ {
+  "id": 3237,
+  "slug": "reasoning-token-room",
+  "title": "Needs token room",
+  "body": "Some free routes spend hidden reasoning tokens before visible output. Avoid tiny max_tokens values or requests can finish by length with empty content.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "openrouter",
+    "model_glob": "poolside/laguna-xs-2.1:free"
+   },
+   {
+    "platform": "kilo",
+    "model_glob": "poolside/laguna-xs-2.1:free"
+   },
+   {
+    "platform": "cloudflare",
+    "model_glob": "@cf/openai/gpt-oss-*"
+   },
+   {
+    "platform": "ovh",
+    "model_glob": "gpt-oss-20b"
+   },
+   {
+    "platform": "ovh",
+    "model_glob": "Qwen3.6-27B"
+   },
+   {
+    "platform": "requesty",
+    "model_glob": "poolside/laguna-m.1"
+   },
+   {
+    "platform": "ovh",
+    "model_glob": "Qwen3.8-27B"
+   }
+  ]
+ },
+ {
+  "id": 3238,
+  "slug": "gemini-thinking-token-room",
+  "title": "Thinking tokens use output cap",
+  "body": "Gemini Flash can spend hidden thinking tokens inside maxOutputTokens. Avoid tiny max_tokens values or set thinkingBudget to 0 when provider support is available.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "google",
+    "model_glob": "gemini-3*flash*"
+   }
+  ]
+ },
+ {
+  "id": 3239,
+  "slug": "cohere-reasoning-output",
+  "title": "May emit reasoning prose",
+  "body": "Cohere Command A Reasoning can spend output budget explaining its thought process on terse prompts. Use a larger max_tokens cap or a stricter no-reasoning instruction when exact short answers are required.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "cohere",
+    "model_glob": "command-a-reasoning-*"
+   }
+  ]
+ },
+ {
+  "id": 3240,
+  "slug": "or-ultra-hangs",
+  "title": "OpenRouter ultra route hangs",
+  "body": "nemotron-3-ultra (550B) on OpenRouter takes 180s+ even on trivial prompts (heavily congested), so its OR row is seeded disabled. Use the OpenCode Zen route instead.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "openrouter",
+    "model_glob": "*nemotron-3-ultra*"
+   }
+  ]
+ },
+ {
+  "id": 3241,
+  "slug": "ovh-anon-trickle",
+  "title": "Anonymous tier is 2 req/min",
+  "body": "OVH AI Endpoints anonymous mode is documented at 2 req/min per IP per model (observed even stricter across models). The 400 req/min authenticated tier requires a Public Cloud project with a payment method, so the catalog ships the keyless path. Treat as a breadth/fallback tier, not a throughput tier.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "ovh",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3242,
+  "slug": "pollinations-degraded",
+  "title": "Zero-priced community routes can rotate",
+  "body": "These are community routes: individual publishers (e.g. AkshayCoder48 \"FreeAIXYZ\", NamanSoni78, morriszdweck) register relays in Pollinations’ registry, and the catalog lists only the ones priced at zero Pollen. A publisher can re-price, rotate or withdraw a route, and Pollinations can delist it from the public registry, without notice; delisted routes may keep answering for a while. Use the 10 RPM per-user ceiling shown in the catalog and expect occasional fail-over.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "pollinations",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3243,
+  "slug": "zen-promo-roster",
+  "title": "Limited-time promo, roster rotates",
+  "body": "OpenCode Zen free models are explicitly limited-time promotional access (\"available for a limited time\" per the docs), not a recurring quota. The roster rotates: qwen3.6-plus and minimax-m3 promos already ended. Expect any row here to die without notice; prompts/outputs may be used for model improvement.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "opencode",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3244,
+  "slug": "opencode-responses-only",
+  "title": "Responses API only",
+  "body": "OpenCode Zen exposes this model through POST /v1/responses rather than /v1/chat/completions. Clients and adapters must use the Responses API transport.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "opencode",
+    "model_glob": "muse-spark-1.3-contributor-free"
+   }
+  ]
+ },
+ {
+  "id": 3245,
+  "slug": "zen-serves-ultra-fast",
+  "title": "Zen serves the 550B fast",
+  "body": "OpenCode Zen serves nemotron-3-ultra in ~2s with working tool calls where the OpenRouter route hangs — the live-verified path for this model.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "opencode",
+    "model_glob": "*nemotron-3-ultra*"
+   }
+  ]
+ },
+ {
+  "id": 3246,
+  "slug": "zhipu-shared-key",
+  "title": "Works with existing Zhipu key",
+  "body": "glm-4.6v-flash is listed Free on Z.AI and answers 200 with the existing bigmodel.cn key; vision and structured tool calls both live-verified.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "zhipu",
+    "model_glob": "*glm-4.6v*"
+   }
+  ]
+ },
+ {
+  "id": 3247,
+  "slug": "aihorde-anon-slow",
+  "title": "Free volunteer queue, slow",
+  "body": "AI Horde routes to volunteer-run workers through a priority queue, so latency is seconds to minutes, not the sub-second of hosted providers. The anonymous key 0000000000 runs at the lowest priority; register a free key at aihorde.net for higher priority. The provider uses a 120s timeout.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3248,
+  "slug": "aihorde-no-tools",
+  "title": "No tool calling",
+  "body": "AI Horde's OpenAI-compatible proxy does not support function/tool calling. The provider drops tools, tool_choice and parallel_tool_calls so a tool-using request still completes as plain chat instead of failing.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3249,
+  "slug": "aihorde-usage-estimated",
+  "title": "Usage is kudos; tokens estimated",
+  "body": "The proxy returns usage as {\"kudos\": N} with no token counts, and rejects max_tokens below 16 and a non-array stop. The AIHordeProvider normalizes the request (floors max_tokens, wraps stop) and synthesizes prompt/completion token estimates so analytics and savings math aren't zero.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3250,
+  "slug": "aihorde-roster-rotates",
+  "title": "Roster + context depend on online workers",
+  "body": "Model availability changes as volunteer workers come and go, so a listed model can be temporarily unserved. The effective context window is set by the worker (often 4-8K), not the model's native maximum.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3251,
+  "slug": "aihorde-quality-uneven",
+  "title": "Uneven quality",
+  "body": "Output quality varies by worker and quantization, and some workers append template or instruction text after the answer. Best treated as free fallback capacity, not a primary model.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3252,
+  "slug": "aihorde-behemoth-slow",
+  "title": "123B has heavy queue (seeded disabled)",
+  "body": "Behemoth-X-123B has deep queue depth (50s+ ETA even on trivial prompts). Seeded disabled; enable only if minute-scale latency is acceptable.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aihorde",
+    "model_glob": "*Behemoth-X-123B*"
+   }
+  ]
+ },
+ {
+  "id": 3253,
+  "slug": "kilo-auto-token-room",
+  "title": "Auto route needs token room",
+  "body": "Kilo auto/free can route to reasoning models that spend 100+ internal reasoning tokens. Avoid tiny max_tokens or a request can finish by length with empty content.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "kilo",
+    "model_glob": "kilo-auto/free"
+   }
+  ]
+ },
+ {
+  "id": 3254,
+  "slug": "safety-classifier-output",
+  "title": "Safety classifier output",
+  "body": "This route returns moderation/safety labels rather than normal assistant prose. Use it as a guardrail model, not a primary chat model.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "kilo",
+    "model_glob": "*content-safety*"
+   },
+   {
+    "platform": "ovh",
+    "model_glob": "Qwen3Guard-*"
+   },
+   {
+    "platform": "requesty",
+    "model_glob": "nvidia/nemotron-3.5-content-safety"
+   }
+  ]
+ },
+ {
+  "id": 3255,
+  "slug": "hy3-limited-free",
+  "title": "Free route can change",
+  "body": "Tencent Hy3 is currently free on these routes, but provider announcements describe some access as limited-time promotional availability. Monitor before aging into the monthly catalog.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "requesty",
+    "model_glob": "novita/tencent/hy3"
+   }
+  ]
+ },
+ {
+  "id": 3256,
+  "slug": "nara-free-plan",
+  "title": "Daily free quota",
+  "body": "NaraRouter free access requires a no-card account key plus Telegram channel/link verification. The free plan is documented at 7M tokens/day and 10 req/min, with daily reset.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nara",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3257,
+  "slug": "ovh-qwen-think-trace",
+  "title": "May emit thinking trace",
+  "body": "OVH Qwen reasoning routes can include <think> blocks or reasoning prose. Strip or suppress the thinking trace when a plain answer is required.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "ovh",
+    "model_glob": "Qwen3*"
+   }
+  ]
+ },
+ {
+  "id": 3258,
+  "slug": "requesty-non-greedy-sampling",
+  "title": "Requires non-greedy sampling",
+  "body": "Requesty rejected this route when temperature was 0 with greedy sampling. Use a nonzero temperature or provider-compatible sampling parameters.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "requesty",
+    "model_glob": "mistral/leanstral-1-5"
+   }
+  ]
+ },
+ {
+  "id": 3259,
+  "slug": "hf-tiny-credit",
+  "title": "Small $0.10/month routed credit",
+  "body": "HuggingFace Inference Providers grants only ~$0.10/month of routed credit on the free tier (PRO is $2/month). Enough for light experimentation; exhausts quickly. Credits apply only to HF-routed requests.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "huggingface",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3260,
+  "slug": "github-free-quota",
+  "title": "Daily GitHub Models free quota",
+  "body": "GitHub Models free API quotas reset daily and are shared by rate-limit tier: low-tier models allow 15 RPM / 150 requests per day, high-tier models 10 RPM / 50 per day, and DeepSeek R1 1 RPM / 8 per day. Intended for experimentation, not production.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "github",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3261,
+  "slug": "modelscope-aliyun-binding",
+  "title": "Requires Alibaba Cloud (China) account binding",
+  "body": "Free, but requires binding your ModelScope account to an Alibaba Cloud CHINA-site (cn) account with Chinese real-name verification — international (alibabacloud.com) accounts do not qualify (maintainer-confirmed). The API token mints without the binding, but every call then fails with `401 please bind your alibaba cloud account before use`.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "modelscope",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3262,
+  "slug": "bai-limited-time-free",
+  "title": "Limited-time 0-credit promotion",
+  "body": "B.AI currently bills selected launch models at 0 Credits under limited-time promotions. B.AI says standard pricing resumes when an offer ends; re-check pricing before use after any provider notice.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "bai",
+    "model_glob": "deepseek-v4-flash"
+   },
+   {
+    "platform": "bai",
+    "model_glob": "glm-5.3-flash"
+   },
+   {
+    "platform": "bai",
+    "model_glob": "qwen3.8-flash"
+   }
+  ]
+ },
+ {
+  "id": 3263,
+  "slug": "cn-real-name-verification",
+  "title": "Requires Chinese real-name verification",
+  "body": "Free, but the cloud account must pass Chinese real-name verification (实名认证) — normally a mainland ID or business licence — before the key will serve traffic. A key can usually be created without it, and then every call fails on auth or permission. Baidu Qianfan, Volcengine Ark and iFlytek Spark all sit behind this gate. LongCat is the exception: its platform accepts an email signup from outside mainland China.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "qianfan",
+    "model_glob": null
+   },
+   {
+    "platform": "volcengine",
+    "model_glob": null
+   },
+   {
+    "platform": "xfyun",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3264,
+  "slug": "sail-monthly-credit-wallet",
+  "title": "Monthly credit requires a payment method",
+  "body": "Sail grants $5 in free credits each month only while a payment method is attached. Usage becomes pay-as-you-go after that credit is exhausted, so configure Sail spend controls and monitor the account balance. Requests run as background jobs and may remain queued for several minutes.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "sail",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3265,
+  "slug": "radeon-shared-free-rotating",
+  "title": "Free shared roster rotates",
+  "body": "AMD Radeon Cloud's shared Model API is free and does not consume GPU-instance credits. Its public models are experimental and may rotate; per-account request and daily allowance values are reported dynamically in response headers rather than guaranteed as fixed catalog limits.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "radeon",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3266,
+  "slug": "radeon-qwen-request-shape",
+  "title": "Strict Qwen request shape",
+  "body": "Qwen3.8 Flash Next accepts at most one leading system message, low or medium reasoning effort, single tool calls, and JSON-object output. The adapter coalesces system instructions, disables parallel tool calls, and downgrades JSON Schema requests to JSON-object mode.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "radeon",
+    "model_glob": "Qwen3.8-Flash-Next"
+   }
+  ]
+ },
+ {
+  "id": 3267,
+  "slug": "electronhub-shared-weekly-credit",
+  "title": "Shared weekly free credits",
+  "body": "ElectronHub Free renews $0.25 each week (Sunday 21:00 UTC), shared across eligible non-premium models; unused weekly credit does not roll over. These are credit-backed routes, not the separate daily :free aliases. Paid top-ups are optional and not included in this allowance. Text inference was tested; other capability flags come from the provider roster.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "electronhub",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3268,
+  "slug": "experiential-shared-monthly-credit",
+  "title": "Shared monthly Free-plan credits",
+  "body": "Experiential publishes 500 Free-plan credits each month at one cent per credit ($5 shared across hosted models). Check your plan and balance in the provider dashboard; successful inference alone does not distinguish monthly, welcome or purchased credits. BYOK usage and optional paid top-ups are outside the free grant. Text inference was tested; other capability flags come from the provider roster.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "experiential",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3269,
+  "slug": "router9-shared-monthly-credit",
+  "title": "Shared monthly free credits",
+  "body": "Router9 Free renews 20,000 credits (about $2) each calendar month, shared across allowlisted routes, resetting on the first day at 00:00 UTC with no rollover. Current credit documentation and authenticated Free-plan headers agree on 20,000; older marketing pages still quote 50,000. Six added routes passed short non-streaming text tests on September 14, 2026; MiniMax M3 passed earlier text and streaming checks. Context and vision capabilities are provider-advertised, not newly feature-tested. Paid top-ups are outside the free allowance. https://www.router9.com/docs/token-plan/credits",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "router9",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3270,
+  "slug": "septor-shared-daily-free",
+  "title": "Shared daily free-model allowance",
+  "body": "Septor zero-price routes share 50 requests and 500K tokens per day. This resets daily, not monthly. Its separate $1 signup grant expires after 90 days and is not recurring. These four routes returned matching model IDs in text and streaming tests with usage.cost=0; model-ID matching is not independent verification of weights. Other aliases that silently substituted MiniMax M2.5 are excluded. Tool capability flags are provider-advertised, not live-tested.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "septor",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3271,
+  "slug": "clod-shared-daily-free",
+  "title": "Shared daily free requests",
+  "body": "CLōD grants 100 requests per day across eligible free models, automatically replenished, with no card required. This is daily, not monthly, and not a separate grant per model. Use the exact friendly model IDs including spaces. Only four routes returned consistent upstream identities in live tests; Llama and Trinity aliases that substituted Gemma are excluded. Matching response IDs do not independently verify the served weights. Context and tool support are not claimed without provider-specific evidence.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "clod",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3272,
+  "slug": "speechify-shared-monthly-characters",
+  "title": "Monthly free text-to-speech characters",
+  "body": "Speechify Free includes 500,000 characters per month shared across TTS models, with no card required. Free usage pauses when exhausted. Characters are not tokens and are not a grant per model. Both Simba 3.0 and Simba 3.2 generated valid MP3 audio. Use the native TTS adapter; these are not chat models. API version 2026-09-08, default tested voice alec. See https://speechify.ai/pricing and the workspace allowance.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "speechify",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3273,
+  "slug": "blaze-shared-daily-free",
+  "title": "Daily free tokens require Discord verification",
+  "body": "BlazeAPI Free grants 200,000 tokens daily shared across free-plan routes. Join its Discord and complete free-tier verification. These three named routes passed ordinary and streaming requests with plan=free and zero paid balance. Use https://api.blazeapi.org/paid/v1 even on the Free plan. Per-token price metadata describes paid usage; the tested requests used the free plan. A transient 503 is not evidence of paid access. Optional paid balances and upgrades are outside this free allowance.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "blaze",
+    "model_glob": "tok/deepseek-chat-v3"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "tok/deepseek-v4-flash"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "tok/deepseek-v4-pro"
+   }
+  ]
+ },
+ {
+  "id": 3274,
+  "slug": "sail-glm52-is-glm53-alias",
+  "title": "Legacy GLM 5.2 ID resolves to GLM 5.3",
+  "body": "The legacy zai-org/GLM-5.2-FP8 request ID returned zai-org/GLM-5.3 in the September 12 live test. It is retained as an explicitly labeled compatibility alias, not a separate GLM-5.2 model or a new GLM-5.3 addition. Use the existing canonical GLM-5.3 row for new integrations.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "sail",
+    "model_glob": "zai-org/GLM-5.2-FP8"
+   }
+  ]
+ },
+ {
+  "id": 3275,
+  "slug": "router9-deepseek-flash-0731-alias",
+  "title": "Unversioned route resolves to 0731",
+  "body": "On September 14, 2026, deepseek/deepseek-v4-flash returned a valid completion identifying deepseek/deepseek-v4-flash-0731. The public free-model listing still labels this route 0423. The catalog displays the observed 0731 revision while preserving the tested request ID. Response identifiers are provider assertions, not independent verification of weights.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "router9",
+    "model_glob": "deepseek/deepseek-v4-flash"
+   }
+  ]
+ },
+ {
+  "id": 3276,
+  "slug": "navy-free-plan-suspended",
+  "title": "Free plan suspended by the provider",
+  "body": "On September 18, 2026 every NavyAI route answered 403 \"The Free plan is temporarily disabled due to abuse. You can purchase a plan at https://api.navy/dashboard/billing to continue using the API.\" on a valid free key. Separately, 52 of the 69 catalog ids now carry non-zero prompt and completion prices in NavyAI's own model list, so most of them would not be free even if the plan were re-opened. All rows stay disabled until the free plan returns AND the pricing reads zero.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "navy",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3277,
+  "slug": "experiential-card-verification-required",
+  "title": "$1 card verification gates the monthly pool",
+  "body": "On September 15, 2026 every Experiential Labs completion returned 429 card_required: \"Complete the $1 card verification to spend platform credits\", including the ordinary 500-credit monthly pool. The catalog's no-card rule therefore disables these rows until the account is verified or the gate is lifted.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "experiential",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3278,
+  "slug": "orcarouter-github-link-required",
+  "title": "Free routes need a linked GitHub account",
+  "body": "OrcaRouter moved to api.orcarouter.ai and now returns 429 err_free_access_denied (\"Link a GitHub account\") on free routes for accounts without a linked GitHub identity. Rows are disabled until the account is linked. qwen/qwen3.8-27b-free was removed from the roster.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "orcarouter",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3279,
+  "slug": "mistral-free-plan-zero-cap",
+  "title": "Free plan caps this model at 0 requests per minute",
+  "body": "On September 15, 2026 the Free-plan key returned x-ratelimit-limit-req-minute: 0 for this model on every attempt over 30 minutes, while Codestral, Ministral and Voxtral routes served at 30 to 750 RPM. The row is disabled until Mistral includes the model in the Free plan again. Retired Magistral and Medium 3 rows were removed.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "mistral",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3280,
+  "slug": "sail-qwen36-flex-only",
+  "title": "Only the flex completion window is offered",
+  "body": "Sail returns 400 \"supports: flex\" for this model even with completion_window=flex on the standard chat endpoint. Disabled until a working request shape is confirmed.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "sail",
+    "model_glob": "Qwen/Qwen3.6-35B-A3B"
+   }
+  ]
+ },
+ {
+  "id": 3281,
+  "slug": "lucidity-shared-daily-free",
+  "title": "Shared daily free-model requests; open/* routes are aliases",
+  "body": "Lucidity Composite grants 250 free-model requests per day per account with no card. Only the four listed routes returned the requested model in the September 15 live test. Every open/* route (DeepSeek, Kimi, Llama, Nemotron, Gemma, GPT-OSS, Granite, Inkling) silently returned synth-2.5-preview roleplay text and is excluded. The two synth routes are Lucidity's own model and identify inconsistently. A 429 \"Free, subscription, and BYOK\" error is the shared free cap, not a per-model limit.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "lucidity",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3282,
+  "slug": "airforce-free-plan-limits",
+  "title": "Free plan is 1 request per minute",
+  "body": "Api.Airforce Free grants 1,000 requests per day at 1 request per minute per account with per-model token caps and no card. The 21 listed routes returned matching model IDs on September 15. kimi-k2.7-code requires a paid plan; gpt-oss-120b, Mistral Large and Mistral Medium returned 503 and are excluded. Most routes are proxied Mistral free-plan models; treat them as sharing that upstream capacity.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "airforce",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3283,
+  "slug": "dreamprompting-failover-router",
+  "title": "Pooled fail-over router; most routes substitute models",
+  "body": "DreamPrompting pools upstream free tiers and fails over between them. Free is 500,000 tokens and 5,000 requests per rolling 24 hours, 100 requests per minute per IP, no card. Only the nine listed routes returned the requested model on September 15 (retried twice). The other 19 routes (Cohere, Gemini, Qwen, Llama, Granite, Mistral Small and Large, gemma-4) consistently served Nemotron 3 Super, gpt-oss-120b or Codestral instead and are excluded. Prompts may be stored or publicly shared per the provider.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "dreamprompting",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3284,
+  "slug": "waterfall-free-routes",
+  "title": "Free routes depend on upstream availability",
+  "body": "Waterfall serves -free routes at no charge with no card under unpublished community rate limits. The ten listed routes returned matching model IDs on September 15. Twelve other -free routes (gemma-4 variants, nemotron-3-ultra, content-safety, laguna-xs, north-mini-code, dots-3, glm-5.2, ling-fin) returned 503 upstream_unavailable on two attempts and are not listed; inkling routes are forbidden and Lyria routes require payment.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "waterfall",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3285,
+  "slug": "logfare-fair-use-logging",
+  "title": "Fair-use free tier funded by logging all traffic",
+  "body": "Logfare offers registered accounts unmetered fair-use access with no card, funded by logging every request for research; do not send private data. Only logfare/auto and gemma-4-26b are free-tier routes; glm-5.3, glm-5.3-flash, kimi-k3, kimi-k2.6, qwen-3.8-27b and moondream3.1 return 403 premium. mimo-v2.5 hit an account rate limit twice and is excluded. Usage reports a neurons field. Responses include reasoning content.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "logfare",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3286,
+  "slug": "zen-free-client-locked",
+  "title": "OpenCode's free tier only works inside OpenCode",
+  "body": "On September 17, 2026 every free Zen model answered 403 FreeTierError (\"OpenCode's free tier can only be used from within OpenCode\") on a valid key, with or without the OpenCode client headers, and deepseek-v4-flash-free answered 400 \"Model is unavailable\". The rows are disabled until OpenCode opens the free roster to API clients again.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "opencode",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3287,
+  "slug": "reka-prepaid-credits",
+  "title": "New accounts need prepaid credits",
+  "body": "Reka's FAQ now says to add credits before making requests, and a $0 balance returns P001 Insufficient Balance. Accounts that still hold credit keep working: reka-flash-3 and reka-edge-2603 answered 200 on September 17, 2026. The old reka-flash id returns 404 \"Unknown chat model\" and is disabled.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "reka",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3288,
+  "slug": "nvidia-route-hangs",
+  "title": "NVIDIA almost never answers this model",
+  "body": "Over the 14 days to September 17, 2026 this route answered 1 of 15 attempts (Kimi K3) and 1 of 10 (DeepSeek V4 Flash 0731) on a valid key. The rest hung for 40 to 180 seconds until timeout, and direct calls hung past 240 seconds. The rows are disabled so auto routing stops spending its failover budget on them.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nvidia",
+    "model_glob": "moonshotai/kimi-k3"
+   },
+   {
+    "platform": "nvidia",
+    "model_glob": "deepseek-ai/deepseek-v4-flash-0731"
+   }
+  ]
+ },
+ {
+  "id": 3289,
+  "slug": "septor-gemma-daily-free",
+  "title": "Shared daily free-model allowance",
+  "body": "This named Gemma route returned a matching model ID and usage.cost=0. It shares the provider daily free allowance; the separate signup credit is not recurring. No tool or vision capability was advertised for this route.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "septor",
+    "model_glob": "gemma-4-31b-it-free"
+   }
+  ]
+ },
+ {
+  "id": 3290,
+  "slug": "hf-monthly-credits-exhausted",
+  "title": "Monthly included credits run out",
+  "body": "HuggingFace meters Inference Providers in dollars, not tokens: free accounts get $0.10 credited every month. When it is spent every route answers 402 \"You have depleted your monthly included credits\", as happened during the September 18, 2026 audit. This is a spent-wallet state, not a dead route, and it clears when the monthly grant renews. Rows are kept enabled and the router should treat 402 here as a provider-level cooldown to the start of next month rather than a per-model failure.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "huggingface",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3291,
+  "slug": "electronhub-free-suffix-needs-phone",
+  "title": "The :free aliases need phone verification",
+  "body": "ElectronHub's zero-credit \":free\" aliases answered 403 \"To prevent abuse and high traffic on free models, phone verification is required\" on September 18, 2026. The ordinary ids this catalog carries are NOT affected and were re-tested working the same day, so the :free aliases are simply not worth adding. ElectronHub's recurring grant is $0.25 credited every Sunday at 21:00 UTC plus a separate daily Neutrino allowance.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "electronhub",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3292,
+  "slug": "orcarouter-aged-github-gate",
+  "title": "Free models need an aged GitHub account",
+  "body": "OrcaRouter free routes answered 429 \"Free models are not available to this account yet. They require the workspace owner to link a GitHub account that has been registered for some time\" on September 18, 2026. The free package is live and the ids are real, but this account cannot reach it, so the rows stay disabled. Note also that OrcaRouter silently drops a free id from an extra_body.models fallback chain, and returns its prompt-length rejection as a non-retryable 400 rather than a 429.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "orcarouter",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3293,
+  "slug": "lucidity-open-routes-substitute",
+  "title": "open/* routes serve a different model",
+  "body": "Re-confirmed on September 18, 2026: every Lucidity open/* route requested (DeepSeek V4 Flash 0731, Kimi K2.6, Llama 3.3 70B, Nemotron 3 Super and Ultra, Mixtral 8x22B) returned HTTP 200 whose response model field read synth-2.5-preview, with roleplay text. They are not the advertised models and must not be added. Free traffic is also capped at 5 requests per minute per account, returned as a 429 naming free, subscription and BYOK together.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "lucidity",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3294,
+  "slug": "septor-free-aliases-substitute",
+  "title": "Most -free aliases serve MiniMax M2.5",
+  "body": "On September 18, 2026 eleven candidate Septor -free ids (glm-4.5-air, ling-2.6-flash, llama-3.1-8b, llama-3.2-1b and -3b, llama-3.3-70b, minimax-m2, nemotron-3-nano-30b-a3b, mistral-nemo, step-3.5-flash, dolphin-mistral-24b) all answered with response model minimax-m2.5-free. Only the ids already in this catalog were re-verified as serving their own weights. Never add a Septor alias without comparing the responding model id.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "septor",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3295,
+  "slug": "aclide-shared-monthly-credit",
+  "title": "Shared monthly free usage credits",
+  "body": "ACLIDE Free includes €20 of internal usage credits renewed monthly with no payment card required. This is one account-wide allowance, not a separate grant per model or a cash token budget. These four routes passed text and function-call tests with matching returned model IDs. The native Responses adapter buffers streaming replies until completion. Vision and context limits are not claimed without route-specific verification. Matching response IDs do not independently authenticate the served weights. See https://aclide.com/en/pricing and https://aclide.com/en/documentation.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "aclide",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3296,
+  "slug": "hf-router-no-enabled-provider-2026-09-21",
+  "title": "No inference provider serves this model",
+  "body": "Key-tested on September 21, 2026: the HuggingFace router answered these ids with \"The requested model is not supported by any provider you have enabled\". They are catalogued on the Hub but no Inference Provider serves them, so the route cannot succeed for any account. Separately, the router meters dollars against a $0.10 monthly included credit, not tokens; when that credit is spent every other row returns 402 until the monthly reset.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "huggingface",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3297,
+  "slug": "pollinations-pollen-priced-2026-09-21",
+  "title": "No longer zero-pollen",
+  "body": "Key-tested on September 21, 2026 against gen.pollinations.ai, the live API. openai-fast now carries prompt and completion pollen rates and resolves to the paid upstream gpt-5-nano-2025-08-07; z-ai/glm-5.3-flash and deepseek/deepseek-v4.1-flash are likewise pollen-priced. community/NamanSoni78/opus-5-max and community/NamanSoni78/gpt-5.4-nano are absent from the model list and answer 200 with zero completion tokens. The legacy text.pollinations.ai host is a one-model stub and must not be used to judge this provider.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "pollinations",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3298,
+  "slug": "lucidity-synth-2-5-withdrawn-2026-09-21",
+  "title": "Route withdrawn upstream",
+  "body": "Key-tested on September 21, 2026: lucidityai/synth-2.5-pro:free and lucidityai/synth-2.5-flash:free return 404 upstream_rejected with the message Unknown model \"synth-2.5\" / \"synth-2.5-preview\". The models behind Lucidity's own branded routes are gone.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "lucidity",
+    "model_glob": "lucidityai/synth-2.5-*"
+   }
+  ]
+ },
+ {
+  "id": 3299,
+  "slug": "nvidia-flux-not-on-nim-2026-09-21",
+  "title": "Image models are not on the NIM chat host",
+  "body": "Key-tested on September 21, 2026: black-forest-labs/flux.1-dev and flux.2-klein-4b return a bare 404 from integrate.api.nvidia.com. NVIDIA serves these from a different host, so they cannot be reached through the NIM OpenAI-compatible endpoint this catalog uses.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nvidia",
+    "model_glob": "black-forest-labs/*"
+   }
+  ]
+ },
+ {
+  "id": 3300,
+  "slug": "deepseek-v4-flash-0731-free-withdrawn-2026-09-21",
+  "title": "Free route withdrawn, paid route remains",
+  "body": "Key-tested on September 21, 2026. OpenRouter answers deepseek/deepseek-v4-flash-0731:free with \"This model is unavailable for free. The paid version is available now - use this slug instead: deepseek/deepseek-v4-flash-0731\"; Kilo's gateway no longer lists the :free id at all; and NVIDIA returns 410 Gone, \"the model has reached its end of life on 2026-09-21\". ModelScope is the remaining zero-cost route to these weights.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "openrouter",
+    "model_glob": "deepseek/deepseek-v4-flash-0731:free"
+   },
+   {
+    "platform": "kilo",
+    "model_glob": "deepseek/deepseek-v4-flash-0731:free"
+   }
+  ]
+ },
+ {
+  "id": 3301,
+  "slug": "mistral-voxtral-tts-id-2026-09-21",
+  "title": "Model id does not exist",
+  "body": "Key-tested on September 21, 2026: Mistral answers voxtral-mini-tts-2603 with 400 invalid_model. The TTS model is published as voxtral-tts-26-03. A replacement row should be added under the correct id rather than this one re-enabled.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "mistral",
+    "model_glob": "voxtral-mini-tts-2603"
+   }
+  ]
+ },
+ {
+  "id": 3302,
+  "slug": "ovh-sdxl-withdrawn-2026-09-21",
+  "title": "Route withdrawn upstream",
+  "body": "Key-tested on September 21, 2026: OVH answers stable-diffusion-xl-base-v10 with model_not_found. Separately, only nine models on OVH AI Endpoints are priced at €0; the rest are reachable solely through the anonymous two-requests-per-minute-per-IP path.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "ovh",
+    "model_glob": "stable-diffusion-xl-base-v10"
+   }
+  ]
+ },
+ {
+  "id": 3303,
+  "slug": "nara-stepfun-paid-2026-09-21",
+  "title": "Moved to a paid plan",
+  "body": "Key-tested on September 21, 2026: NaraRouter answers stepfun-3.7-flash with 402 payment_required, \"Insufficient credits. Please top up your balance.\" The route left the free plan.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nara",
+    "model_glob": "stepfun-3.7-flash"
+   }
+  ]
+ },
+ {
+  "id": 3304,
+  "slug": "moondream-shared-monthly-credits",
+  "title": "Shared $5 monthly hosted usage credits",
+  "body": "Moondream Cloud Free includes $5 per workspace in recurring monthly usage credits, shared across models; usage beyond that allowance is metered. Both listed routes passed live vision and streaming tests through the adapter on 2026-09-22. Images must be base64 data URLs; remote image URLs, tool calling and stop sequences are unsupported. Output is limited by the upstream API to 4096 tokens including reasoning. Context and request-rate limits are not claimed without verification. This uses the hosted BYOK API, not self-hosted weights. Sources: https://moondream.ai/pricing and https://docs.moondream.ai/openai/.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "moondream",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3305,
+  "slug": "speka-shared-monthly-credit",
+  "title": "Shared monthly free credits",
+  "body": "Speka Free includes $1 of model usage renewed monthly, shared across chat and embeddings, not a separate grant per model. Paid usage beyond the grant may apply according to account billing settings. Text inference and embeddings were tested on 2026-09-24; untested tool and vision capabilities are not enabled. Matching model IDs do not independently authenticate served weights. See https://speka.me/pricing and https://speka.me/docs.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "speka",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3306,
+  "slug": "llmtr-renewable-free-quota",
+  "title": "Renewable free-model quotas",
+  "body": "Selected LLMTR routes are zero-priced with daily or rolling request quotas, not monthly cash credits. Motif 3 replenishes each allowance after 24 hours. New accounts have reduced free allowances until 24 hours old; no top-up is required to wait for that increase. Exact account caps are not assumed. Text completions passed on 2026-09-29; tool and vision flags remain off until separately tested. The public roster also includes paid, temporary and BYOK-only models which are not included here. See https://llmtr.com/docs/en/migration/openai-openrouter/ and https://llmtr.com/docs/en/gateway/motif-3/.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "llmtr",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3307,
+  "slug": "xkiro-lfm25-reasoning-room",
+  "title": "Allow room for reasoning",
+  "body": "This route uses reasoning. A 128-token output budget returned empty content in the 2026-09-30 check; a retry with 768 returned a valid answer. Allow sufficient output tokens for reasoning and the final answer.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "xkiro",
+    "model_glob": "liquid/lfm-2.5-2.6b:free"
+   }
+  ]
+ },
+ {
+  "id": 3308,
+  "slug": "gizmo-monthly-free-text",
+  "title": "Shared monthly free-model requests",
+  "body": "Gizmo Free includes 1,000 zero-cost-model API requests per calendar month, shared by account and reset on the first day UTC. Only tested :free routes are included. The chat endpoint accepts text only: tools, image/audio messages and structured output are unsupported. Six exact-model routes returned valid text with usage.cost=0 on 2026-10-03. Selected adapter chat and streaming checks also passed. Paid-model weekly credits did not bypass the account payment-method requirement. https://gizmoplatforms.com/developers?tab=docs",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "gizmo",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3309,
+  "slug": "blockrun-free-identity-guard",
+  "title": "Zero-priced routes; exact-model guard",
+  "body": "Ongoing zero-priced, rate-limited routes, not a monthly credit grant. These four routes returned their requested model IDs and valid text on 2026-10-03; inference ledger costs settled at $0 on a zero-funded account. BlockRun may substitute another free model when capacity is unavailable; FreeLLMAPI v0.13.4 rejects substitutions rather than mislabeling responses. Tool and vision flags remain off until tested separately. https://blockrun.ai/free and https://blockrun.ai/docs/getting-started/enterprise-api",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "blockrun",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3310,
+  "slug": "openrouter-zero-price-oct04",
+  "title": "Zero-priced access, not monthly credits",
+  "body": "Both routes returned matching-model text completions on October 4, 2026 with usage.cost=0. Shared provider rate limits still apply; free access is not a monthly cash grant and pricing may change. Ling first hit a temporary upstream rate limit and passed on retry. Tool and vision flags remain off until separately tested. See https://openrouter.ai/apodex/apodex-1.1-mini:free and https://openrouter.ai/inclusionai/ling-3.1-flash.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "openrouter",
+    "model_glob": "apodex/apodex-1.1-mini:free"
+   },
+   {
+    "platform": "openrouter",
+    "model_glob": "inclusionai/ling-3.1-flash"
+   }
+  ]
+ },
+ {
+  "id": 3311,
+  "slug": "llmtr-agnes-rolling-free-oct04",
+  "title": "Free allowance replenishes after 24 hours",
+  "body": "Agnes 2.5 Flash and 3.0 Flash are zero-priced on LLMTR. Each successful request replenishes after 24 hours; this is a rolling request quota, not monthly cash credits. Matching-model text completions passed on October 4, 2026. Exact account limits are not assumed. Tool and vision flags remain off until separately tested. See https://llmtr.com/docs/en/gateway/agnes/.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "llmtr",
+    "model_glob": "agnes/agnes-2.5-flash"
+   },
+   {
+    "platform": "llmtr",
+    "model_glob": "agnes/agnes-3.0-flash"
+   }
+  ]
+ },
+ {
+  "id": 3312,
+  "slug": "llmtr-laguna-xs-free-oct04",
+  "title": "Ongoing zero-price Poolside route",
+  "body": "LLMTR lists Laguna XS 2.1 at zero input/output/cache cost, without drawing on the account credit balance. Standard rate limits apply; there is no monthly token grant. A matching-model text completion passed on October 4, 2026 with a 1024-token output budget; tiny caps can produce reasoning without visible output. Poolside may use free-access prompts and completions to improve its products. Tool and vision flags remain off until separately tested. See https://llmtr.com/docs/en/gateway/poolside-laguna/.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "llmtr",
+    "model_glob": "poolside/laguna-xs-2.1"
+   }
+  ]
+ },
+ {
+  "id": 3313,
+  "slug": "blaze-free-daily-oct05",
+  "title": "Shared daily free allowance",
+  "body": "BlazeAPI Free includes 200,000 shared tokens per day, with email verification. This is a daily allowance, not monthly credits or a per-model grant. All eight listed routes returned valid, matching-model text completions on October 5, 2026 with blaze_plan=free and blaze_billing=plan. Use https://api.blazeapi.org/paid/v1 even on Free. Provider metadata advertises a 128,000-token context and 16,000-token maximum output for these routes; tools, vision and streaming were not verified in this audit. Optional paid balances and upgrades are outside this allowance. See https://blazeapi.org/pricing.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "blaze",
+    "model_glob": "free/deepseek-v4-pro"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/glm-5.3-flash"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/qwen3.8-flash-next"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/deepseek-v4.1-flash"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/kimi-k3"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/mimo-v2.6-flash"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/qwen3.8-27b"
+   },
+   {
+    "platform": "blaze",
+    "model_glob": "free/sensenova-6.8-flash-lite"
+   }
+  ]
+ },
+ {
+  "id": 3314,
+  "slug": "typhoon-free-research",
+  "title": "Ongoing free research API",
+  "body": "Typhoon provides an ongoing, rate-limited research API, not monthly credits or a production SLA. Usage data is collected to improve the models and API; review the provider data-use terms before sending sensitive content. Chat, streaming, tool calling and both ASR endpoints were smoke-tested on October 7, 2026. The Isan model was tested with standard Thai speech, not an Isan accuracy benchmark. See https://docs.opentyphoon.ai/en/faq/ and https://docs.opentyphoon.ai/en/asr/.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "typhoon",
+    "model_glob": "*"
+   }
+  ]
+ },
+ {
+  "id": 3315,
+  "slug": "plugsky-permanent-free-aliases",
+  "title": "Permanent free aliases, shared fair use",
+  "body": "Plugsky Free includes Micro and Lite chat/JSON aliases without a card, separately from the wider seven-day trial. Shared fair-use rate limits apply, not a separate monthly credit grant per model. Backing models may change or fail over; streaming can identify the underlying upstream. Chat, JSON mode and streaming were tested on October 8, 2026. Tools and vision are not enabled without Free-plan route-specific verification. See https://plugsky.com/docs.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "plugsky",
+    "model_glob": "*"
+   }
+  ]
+ },
+ {
+  "id": 3316,
+  "slug": "electronhub-speech-weekly-credit",
+  "title": "Speech shares weekly free credits",
+  "body": "ElectronHub Free supplies $0.25 each week across eligible models; these speech routes share that wallet with chat. Tests used no purchased balance. Gemini speech returns WAV; HUMAIN returns MP3. Update the application to a build with ElectronHub speech support. See https://docs.electronhub.ai/billing/credits.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "electronhub",
+    "model_glob": "gemini-3.8-flash-tts"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "gemini-3.8-flash-lite-tts"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "humain-tts"
+   }
+  ]
+ },
+ {
+  "id": 3317,
+  "slug": "huggingface-free-credits-ended-20261007",
+  "title": "Free-account inference credits ended",
+  "body": "Hugging Face now lists no included Inference Providers credits for Free accounts. The official documentation change merged October 7, 2026 (huggingface/hub-docs#2865). Routed inference requires purchased credits or a paid subscription; ZeroGPU Spaces are a separate service and do not fund these router endpoints. Existing records are retained but disabled. See https://huggingface.co/docs/inference-providers/pricing.",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "huggingface",
+    "model_glob": "*"
+   }
+  ]
+ },
+ {
+  "id": 3318,
+  "slug": "inferbase-managed-free-allowance",
+  "title": "Shared monthly and daily free allowance",
+  "body": "Inferbase Free needs no card. The shared account allowance is 5,000 requests/month, also capped at 100 managed requests and $0.50 of model usage/day. Free managed chat permits 8,192 input and 1,024 output tokens per request. Counts are shared, not per-model grants. Model IDs including FP8 and Turbo variants are explicit; a changed response identity fails rather than silently substituting another model. Update FreeLLMAPI to a build with the Inferbase adapter. See https://inferbase.ai/pricing.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "inferbase",
+    "model_glob": "*"
+   }
+  ]
+ },
+ {
+  "id": 3319,
+  "slug": "simplellm-shared-free-model-quota",
+  "title": "Shared hourly and daily free-model quota",
+  "body": "Only the selected free aliases qualify. Tests ran with zero purchased balance and cost_sc=0. Account-reported free quotas are shared across models: 100 requests/hour, 1,000/day, 50K tokens/hour and 500K/day at verification; account limits may change. This is renewable free access, not a monthly dollar grant. Update FreeLLMAPI to a build with the SimpleLLM adapter. See https://simplellm.eu/docs/limits.html.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "simplellm",
+    "model_glob": "*"
+   }
+  ]
+ },
+ {
+  "id": 3320,
+  "slug": "electronhub-embedding-weekly-credit",
+  "title": "Embeddings share weekly free credits",
+  "body": "ElectronHub Free provides $0.25/week shared across eligible chat and embedding models. These routes passed live adapter tests using free weekly credits. After that allowance is spent, stop or wait for renewal; purchased balance or paid top-ups are separate. Update FreeLLMAPI to a build with ElectronHub embedding support. See https://docs.electronhub.ai/billing/credits.",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "electronhub",
+    "model_glob": "text-embedding-3-small"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "text-embedding-3-large"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "codestral-embed"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "mistral-embed"
+   },
+   {
+    "platform": "electronhub",
+    "model_glob": "gemini-embedding-2"
+   }
+  ]
+ },
+ {
+  "id": 3321,
+  "slug": "freeai-shared-daily-allowance",
+  "title": "Shared daily free allowance",
+  "body": "Free accounts share 30,000 internal tokens per day and 1,000 API requests per month across eligible self-hosted models. No card is required. These are shared account allowances, not grants per model. Kokoro returns WAV audio; other formats are not supported by this adapter. Automatic key validation is inconclusive because the tested public endpoints did not distinguish valid and bogus credentials. Use your own Free.ai key for generation. Verified 2026-10-11 against the free-account dashboard and live Kokoro output. https://free.ai/api/ https://free.ai/account/#api-keys",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "freeai",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3322,
+  "slug": "auray-shared-monthly-credits",
+  "title": "Shared monthly credits and history budget",
+  "body": "The Free plan renews 50 credits per month shared across chat, embeddings and other generators. Only the built-in models are eligible; catalogue/serverless models require payment. Free chat history is limited to 24 KB, not the underlying model context; output is capped by the provider. New accounts have reduced generation rate limits during warmup. API: https://www.auray.ai/docs/clients/openai",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "auray",
+    "model_glob": null
+   }
+  ]
+ },
+ {
+  "id": 3323,
+  "slug": "nvidia-trial-oct15-evening",
+  "title": "Developer evaluation and data-use terms",
+  "body": "Ongoing zero-price hosted developer access, not a monthly credit grant or unrestricted production service. NVIDIA trial/prototyping and data-use terms apply. Do not submit personal or confidential data. Text completions with exact model identity passed on October 15, 2026; tool and vision flags remain off until separately tested. Sources: https://build.nvidia.com/stepfun-ai/step-5-preview and https://openrouter.ai/nvidia/nemotron-3.5-super-vl:free",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "nvidia",
+    "model_glob": "stepfun-ai/step-5-preview"
+   },
+   {
+    "platform": "openrouter",
+    "model_glob": "nvidia/nemotron-3.5-super-vl:free"
+   },
+   {
+    "platform": "kilo",
+    "model_glob": "nvidia/nemotron-3.5-super-vl:free"
+   }
+  ]
+ },
+ {
+  "id": 3324,
+  "slug": "llmtr-nemotron-daily-oct15",
+  "title": "Selected daily free route",
+  "body": "This exact -free model is listed at zero input/output cost with a daily quota. This is not a provider-wide free credit balance; the paid sibling is not included. Exact-model text completion passed October 15, 2026; tool and vision flags remain off until separately tested. Source: https://llmtr.com/v1/models",
+  "severity": "info",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "llmtr",
+    "model_glob": "nvidia/nemotron-3.5-super-vl-free"
+   }
+  ]
+ },
+ {
+  "id": 3325,
+  "slug": "llmtr-embedding-free-oct15",
+  "title": "Zero-price embeddings and input data use",
+  "body": "These exact routes are currently listed at zero input cost without a published expiry; they are not a monthly cash grant. Fixed vector dimensions were live-tested. LFM2.5 free successful requests may be retained for training: do not send sensitive or customer data. Requires the LLMTR embeddings adapter. Sources: https://llmtr.com/v1/models and https://llmtr.com/docs/en/gateway/embeddings/",
+  "severity": "warning",
+  "created_at_ms": 1792372010252,
+  "updated_at_ms": 1792372010252,
+  "targets": [
+   {
+    "platform": "llmtr",
+    "model_glob": "llmtr/embeddingmagibu-200m"
+   },
+   {
+    "platform": "llmtr",
+    "model_glob": "liquid/lfm-2.5-embedding-350m-free"
+   }
+  ]
+ }
+]

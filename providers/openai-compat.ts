@@ -60,6 +60,7 @@ export class OpenAICompatAdapter implements ProviderAdapter {
     if (req.tool_choice !== undefined) reqBody.tool_choice = req.tool_choice;
     if (req.response_format !== undefined) reqBody.response_format = req.response_format;
     if (req.user !== undefined) reqBody.user = req.user;
+    if (req.stream) reqBody.stream = true;
 
     const controller = new AbortController();
     const timeoutMs = options?.timeout_ms ?? 60_000;
@@ -87,6 +88,13 @@ export class OpenAICompatAdapter implements ProviderAdapter {
       }
 
       if (req.stream) {
+        const ctype = res.headers.get("content-type") ?? "";
+        if (ctype.includes("application/json")) {
+          // Upstream ignored stream=true and answered with one JSON body —
+          // re-emit it as a single-chunk SSE sequence so clients stay uniform.
+          const full = (await res.json()) as ChatCompletionResponse;
+          return { stream: this.singleChunkStream(full), latency_ms };
+        }
         const reader = res.body?.getReader();
         if (!reader) return { error: "No response body", status: 502, latency_ms };
 
@@ -105,6 +113,28 @@ export class OpenAICompatAdapter implements ProviderAdapter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Wrap a whole ChatCompletionResponse as a chunk iterator ending with a stop chunk. */
+  private async *singleChunkStream(full: ChatCompletionResponse): AsyncIterable<ChatCompletionChunk> {
+    const choice = full.choices?.[0];
+    const base = {
+      id: full.id,
+      object: "chat.completion.chunk" as const,
+      created: full.created,
+      model: full.model,
+    };
+    if (choice?.message?.content) {
+      yield {
+        ...base,
+        choices: [{ index: 0, delta: { role: "assistant", content: choice.message.content }, finish_reason: null }],
+      } as unknown as ChatCompletionChunk;
+    }
+    yield {
+      ...base,
+      choices: [{ index: 0, delta: {}, finish_reason: choice?.finish_reason ?? "stop" }],
+      ...(full.usage ? { usage: full.usage } : {}),
+    } as unknown as ChatCompletionChunk;
   }
 
   /** Create async iterator for streaming response */

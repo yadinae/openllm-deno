@@ -27,6 +27,9 @@ interface CachedMetrics {
   last_updated: number;
 }
 
+const PROVIDER_MODEL_CACHE = new Map<string, { at: number; models: ModelInfo[] }>();
+const PROVIDER_MODEL_TTL_MS = 10 * 60 * 1000; // upstream /models lists change rarely
+
 const METRICS_CACHE = new Map<string, CachedMetrics>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -71,7 +74,18 @@ export class SmartRouter {
 
     // 4. Primary = top score, Fallback Chain = next 2-3
     const primary = scored[0];
-    const fallbackChain = scored.slice(1, 4).map(this.toFallbackEntry);
+    // Dedupe by key: the top-scored candidates are often many MODELS of one
+    // dead key — a chain of them burns every retry on the same broken credential.
+    const chainCandidates: ScoredCandidate[] = [];
+    const usedKeys = new Set<string>([primary.key.id]);
+    for (const c of scored.slice(1)) {
+      if (usedKeys.has(c.key.id)) continue;
+      usedKeys.add(c.key.id);
+      chainCandidates.push(c);
+      if (chainCandidates.length >= 6) break;
+    }
+      const fallbackChain = chainCandidates.map(this.toFallbackEntry);
+    console.log(`[router] candidates=${candidates.length} scored=${scored.length} keys=${new Set(scored.map((s2) => s2.key.id)).size} chain=${fallbackChain.length}`);
 
     return {
       provider: primary.provider,
@@ -102,20 +116,28 @@ export class SmartRouter {
         FROM api_keys
         WHERE enabled = true AND status = 'healthy'
       `;
-      dbKeys = keys.map((k: any) => ({
+      dbKeys = (await Promise.all(keys.map(async (k: any) => ({
         id: String(k.id),
         db_id: Number(k.id),
         platform: k.platform,
         label: k.label,
-        encrypted_key: k.encrypted_key,
-        iv: k.iv,
-        auth_tag: k.auth_tag,
+        // Adapters send `key.encrypted_key` as the Bearer token, so it must
+        // hold the DECRYPTED secret by the time it reaches provider.chat().
+        encrypted_key: await decryptSecret(k),
+        iv: "",
+        auth_tag: "",
         status: k.status,
         enabled: k.enabled,
         base_url: k.base_url,
         monthly_request_cap: k.monthly_request_cap ?? 0,
         monthly_token_cap: k.monthly_token_cap ?? 0,
-      }));
+      })))).filter((k) => k.encrypted_key);
+      if (dbKeys.length === 0 && keys.length > 0) {
+        console.warn(`[router] ${keys.length} keys loaded but all dropped by decryption filter`);
+      } else if (dbKeys.length < keys.length) {
+        const dropped = keys.map((k: any) => String(k.platform)).filter((pl: string) => !dbKeys.some((d) => d.platform === pl));
+        console.warn(`[router] decrypt filter: ${dbKeys.length}/${keys.length} keys ok; dropped: ${dropped.join(",")}`);
+      }
     } catch (e) {
       console.error("[router] Failed to load keys from DB:", e);
       return candidates;
@@ -133,13 +155,25 @@ export class SmartRouter {
       const adapter = providerRegistry.get(key.platform);
       if (!adapter) continue;
 
+      // Virtual model names never match a concrete catalog id — every
+      // (provider, model) pair is a legitimate candidate for them.
+      const virtualModel = ctx.request.model === "auto" || ctx.request.model === "fusion";
+
       // Check cooldown
       if (await this.isInCooldown(key.platform, key.id)) continue;
 
-      // Get models this provider supports
-      const models = await this.getProviderModels(adapter, key.platform);
+      // Get models this provider supports. Cap per-platform breadth: without a
+      // limit an `auto` request scores every catalogued model on every key
+      // (500+ candidates) and pays a metrics lookup per candidate on cold cache.
+      const allModels = await this.getProviderModels(adapter, key.platform);
+      const models = allModels.slice(0, 8);
       
       for (const model of models) {
+        // Non-chat models (guard/embed/audio/image) pass curated ranks but
+        // answer chat with scores or 400s — never route to them.
+        if (NON_CHAT_MODEL_RE.test(model.id)) continue;
+        if (CLIENT_LOCKED_MODEL_RE.test(model.id)) continue;
+
         // Filter by client profile model scope
         if (allowedModels && !allowedModels.includes(model.id)) continue;
 
@@ -147,7 +181,7 @@ export class SmartRouter {
         if (preferredProvider && key.platform !== preferredProvider) continue;
 
         // Check if model matches request (for model-specific routing)
-        if (ctx.request.model && !this.modelMatches(ctx.request.model, model.id, key.platform)) {
+        if (!virtualModel && ctx.request.model && !this.modelMatches(ctx.request.model, model.id, key.platform)) {
           continue;
         }
 
@@ -229,14 +263,15 @@ export class SmartRouter {
     try {
       await initDb();
 
-      // Get recent requests (last 24 hours)
-      const since = Date.now() - 24 * 60 * 60 * 1000;
+      // Get recent requests (last 24 hours). timestamp is a TEXT column
+      // holding ISO-8601 UTC strings, so lexicographic comparison works.
+      const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const rows = await query`
-        SELECT latency_ms, status, input_tokens, output_tokens
+        SELECT latency_ms, status_code as sc, input_tokens, output_tokens
         FROM requests
-        WHERE platform = ${platform} AND model_id = ${modelId}
-          AND created_at_ms >= ${since}
-        ORDER BY created_at_ms DESC
+        WHERE platform = ${platform} AND model = ${modelId}
+          AND timestamp >= ${sinceIso}
+        ORDER BY timestamp DESC
         LIMIT 1000
       `;
 
@@ -255,7 +290,7 @@ export class SmartRouter {
         : 2000;
 
       // Calculate success rate
-      const successCount = rows.filter((r: any) => r.status === "success").length;
+      const successCount = rows.filter((r: any) => Number(r.sc) > 0 && Number(r.sc) < 400).length;
       const success_rate = successCount / rows.length;
 
       // Get cost from model config
@@ -320,35 +355,62 @@ export class SmartRouter {
 
   /** Get models supported by a provider (from catalog + discovered) */
   private async getProviderModels(adapter: ProviderAdapter, platform: string): Promise<ModelInfo[]> {
+    // Cache per platform: collectCandidates runs on EVERY routed request and
+    // adapter.models() is a live upstream HTTP call. Without this the router
+    // fans out one /models fetch per enabled key per chat completion.
+    const cached = PROVIDER_MODEL_CACHE.get(platform);
+    if (cached && Date.now() - cached.at < PROVIDER_MODEL_TTL_MS) return cached.models;
+
+    let result: ModelInfo[] = [];
+
     // Try to get from provider's models() method
     try {
       const models = await adapter.models();
-      if (models.length > 0) return models;
+      if (models.length > 0) result = models;
     } catch {
       // Fall through to database
     }
 
-    // Fallback: get from database
-    try {
-      await initDb();
-      const rows = await query`
-        SELECT id, platform, display_name, context_window, is_free, price_note
-        FROM discovered_models
-        WHERE platform = ${platform} AND enabled = true
-      `;
-      return rows.map((r: any) => ({
-        id: r.model_id,
-        display_name: r.display_name,
-        family: platform,
-        capabilities: { chat: true, streaming: true, tools: true, vision: false, reasoning: false },
-        pricing: { input_per_1k: 0, output_per_1k: 0, currency: "USD" as const, updated_at: new Date().toISOString() },
-        context_window: r.context_window ?? 128000,
-        is_free: r.is_free ?? false,
-        price_note: r.price_note,
-      }));
-    } catch {
-      return [];
+    // Fallback: curated/discovered catalog in the database
+    if (result.length === 0) {
+      try {
+        await initDb();
+        // Curated catalog first (ranked, no live call needed), then anything
+        // runtime discovery added on top.
+        const curatedRows = await query`
+          SELECT model_id as mid FROM models
+          WHERE platform = ${platform} AND enabled = 1
+          ORDER BY intelligence_rank DESC NULLS LAST
+          LIMIT 30
+        `;
+        const discRows = await query`
+          SELECT model_id as mid FROM discovered_models
+          WHERE platform = ${platform} AND enabled = true
+        `;
+        const seen = new Set<string>();
+        const rows = [...curatedRows, ...discRows].filter((r: any) => {
+          if (!r.mid || seen.has(r.mid)) return false;
+          seen.add(r.mid);
+          return true;
+        });
+        result = rows.map((r: any) => ({
+          id: r.mid,
+          display_name: r.mid,
+          family: platform,
+          capabilities: { chat: true, streaming: true, tools: true, vision: false, reasoning: false },
+          pricing: { input_per_1k: 0, output_per_1k: 0, currency: "USD" as const, updated_at: new Date().toISOString() },
+          context_window: 128000,
+          is_free: false,
+          price_note: undefined,
+        }));
+      } catch {
+        result = [];
+      }
     }
+
+    if (result.length === 0) console.warn(`[router] getProviderModels(${platform}): EMPTY (live_models_failed_or_empty, catalog+discovered gave 0)`);
+    if (result.length > 0) PROVIDER_MODEL_CACHE.set(platform, { at: Date.now(), models: result });
+    return result;
   }
 
   /** Check if provider/model/key is in cooldown */
@@ -426,11 +488,25 @@ export async function executeWithFallback(
   const decision = await smartRouter.route(ctx);
   const tried = new Set<string>();
 
-  // Try primary
+  // Try primary — the router chose decision.model, so the caller's virtual
+  // model name ("auto") must not leak to the provider.
   const primaryKey = `${decision.provider.id}/${decision.model}/${decision.key.id}`;
   tried.add(primaryKey);
-  const primaryResult = await decision.provider.chat(request, decision.key);
-  if (!primaryResult.error) return primaryResult;
+  console.log(`[router] primary: ${decision.provider.id}/${decision.model} key=${decision.key.label}`);
+  const primaryResult = await decision.provider.chat({ ...request, model: decision.model }, decision.key);
+  if (primaryResult.error) await markKeyUnhealthy(decision.key, primaryResult);
+  if (primaryResult.error) console.warn(`[router] primary failed: ${String(primaryResult.error).slice(0, 200)}`);
+  if (!primaryResult.error) {
+    if (primaryResult.response) {
+      (primaryResult.response as unknown as Record<string, unknown>)._routed_via = {
+        platform: decision.provider.id,
+        model: decision.model,
+        score: decision.metadata.score,
+        reason: decision.metadata.reason,
+      };
+    }
+    return primaryResult;
+  }
 
   // Try fallback chain
   for (const fallback of decision.fallback_chain) {
@@ -447,15 +523,31 @@ export async function executeWithFallback(
 
     const fallbackRequest = { ...request, model: fallback.model };
     const result = await adapter.chat(fallbackRequest, fallbackKeyObj);
+    if (result.error) {
+      console.warn(`[router] fallback ${fallback.provider}/${fallback.model} failed: ${String(result.error).slice(0, 200)}`);
+      await markKeyUnhealthy(fallbackKeyObj, result);
+    }
     if (!result.error) {
       // Log fallback usage
       console.log(`[router] Fallback used: ${fallback.provider}/${fallback.model} (primary failed: ${primaryResult.error})`);
+      if (result.response) {
+        (result.response as unknown as Record<string, unknown>)._routed_via = {
+          platform: fallback.provider,
+          model: fallback.model,
+          fallback: true,
+          primary_error: primaryString(primaryResult.error),
+        };
+      }
       return result;
     }
   }
 
   // All failed - return primary error
   return primaryResult;
+}
+
+function primaryString(err: unknown): string {
+  return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
 }
 
 /** Get API key by database ID */
@@ -475,9 +567,9 @@ async function getKeyById(keyId: string): Promise<ApiKey | null> {
       db_id: Number(k.id),
       platform: k.platform,
       label: k.label,
-      encrypted_key: k.encrypted_key,
-      iv: k.iv,
-      auth_tag: k.auth_tag,
+      encrypted_key: await decryptSecret(k),
+      iv: "",
+      auth_tag: "",
       status: k.status,
       enabled: k.enabled,
       base_url: k.base_url,
@@ -486,5 +578,45 @@ async function getKeyById(keyId: string): Promise<ApiKey | null> {
     };
   } catch {
     return null;
+  }
+}
+
+const NON_CHAT_MODEL_RE = /guard|moderation|embed|whisper|\/tts|audio|transcri|dall-e|image|draw|rerank|ocr|realtime|vision-|live\b/i;
+
+/** OpenCode zen "-free" models are client-locked to the OpenCode IDE
+ * (FreeTierError from any API caller) — never viable as routing targets. */
+const CLIENT_LOCKED_MODEL_RE = /-free$/i;
+
+/** Flip an api key to status=error when upstream rejects its credentials,
+ * mirroring FreeLLMAPI health probe semantics. collectCandidates filters on
+ * status=healthy, so a dead key stops shadowing live ones after one try.
+ * Only 401 / 403 authorization errors qualify; rate limits and 5xx stay on
+ * the cooldown + fallback path. */
+export async function markKeyUnhealthy(key: ApiKey, result: ProviderResult): Promise<void> {
+  try {
+    const st = Number(result.status ?? 0);
+    const msg = typeof result.error === "string" ? result.error : "";
+    const authFailure = st === 401 || (st === 403 && (msg.indexOf("oriz") >= 0 || msg.indexOf("Forbidden") >= 0));
+    if (!authFailure || !key.db_id) return;
+    await query`UPDATE api_keys SET status = 'error', updated_at = now() WHERE id = ${key.db_id} AND status = 'healthy'`;
+    console.warn(`[router] marked key ${key.platform}/${key.label} unhealthy (${st}): ${msg.slice(0, 120)}`);
+  } catch { /* best-effort */ }
+}
+
+/** AES-GCM-decrypt a DB key row into the plaintext secret the adapters use as
+ * their Bearer token. Returns "" when the row is un-decryptable (callers must
+ * treat "" as unusable). */
+export async function decryptSecret(k: {
+  encrypted_key?: string | null;
+  iv?: string | null;
+  auth_tag?: string | null;
+}): Promise<string> {
+  if (!k.encrypted_key) return "";
+  if (!k.iv || !k.auth_tag) return k.encrypted_key; // already-plaintext rows pass through
+  try {
+    const { decryptKey } = await import("../db/mod.ts");
+    return (await decryptKey(k.encrypted_key, k.iv, k.auth_tag)) || "";
+  } catch {
+    return "";
   }
 }

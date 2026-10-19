@@ -7,10 +7,69 @@ import { Hono } from "hono";
 import type { ChatCompletionRequest } from "../providers/types.ts";
 import type { DbData, DbEntry } from "../db/mod.ts";
 import { decryptKey } from "../db/mod.ts";
-import { listApiKeys } from "../db/pg.ts";
+import { listApiKeys, getSetting } from "../db/pg.ts";
 import { executeChat, getAdapterForPlatform } from "../providers/index.ts";
-import type { ProviderResult, ApiKey } from "../providers/types.ts";
+import type { ProviderResult, ApiKey, RoutingContext } from "../providers/types.ts";
 import { requestLogger, generateRequestId } from "../services/request-log.ts";
+import { smartRouter, executeWithFallback } from "../services/router.ts";
+import { runFusion, type FusionConfig } from "../services/fusion.ts";
+
+// Serialize an adapter stream (raw SSE bytes OR parsed chunk iterator) to the
+// client as SSE. Shared by the virtual-model branch and the prefix branch.
+function sseFromStream(stream: unknown): Response {
+  const encoder = new TextEncoder();
+  const source = stream as any;
+  const body_stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        if (typeof source?.getReader === "function") {
+          const reader = source.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) controller.enqueue(value);
+          }
+        } else {
+          const it = source[Symbol.asyncIterator]();
+          for (;;) {
+            const { done, value } = await it.next();
+            if (done) break;
+            if (value) controller.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`));
+          }
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
+      } catch (err) {
+        console.error("[chat] Stream error:", err);
+        controller.enqueue(encoder.encode("data: " + JSON.stringify({ error: String(err) }) + "\n\n"));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      }
+      controller.close();
+    },
+  });
+  return new Response(body_stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+// Whole-response → single SSE chunk stream, for paths that fan out internally.
+function sseFromResponse(resp: Record<string, unknown> | null, model: string): Response {
+  const chunk = {
+    ...(resp ?? { choices: [] }),
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model: (resp?.model as string) ?? model,
+  };
+  return new Response(
+    `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`,
+    { status: 200, headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" } },
+  );
+}
+
 
 export const chatRouter = new Hono<{ Variables: { db: DbData } }>();
 
@@ -47,6 +106,79 @@ chatRouter.post("/chat/completions", async (c) => {
 
   if (!body.model || !Array.isArray(body.messages)) {
     return c.json({ error: "model and messages are required" }, 400);
+  }
+
+  // ── Virtual models (FreeLLMAPI parity) ──────────────────────────────────
+  // "auto": SmartRouter bandit scoring across every enabled key + fallback
+  // chain retry. "fusion": panel fan-out with tool-call voting and optional
+  // judge synthesis. Both bypass the platform-prefix routing below.
+  if (body.model === "auto" || body.model === "fusion") {
+    const vRequestId = generateRequestId();
+    const vStart = Date.now();
+    try {
+      const ctx: RoutingContext = { request: body, available_keys: [] };
+      if (body.model === "fusion") {
+        const decision = await smartRouter.route(ctx);
+        const storedCfg = ((await getSetting<Record<string, unknown>>("fusion_config")) ?? {}) as Partial<FusionConfig>;
+        const inlineCfg = ((body as unknown as Record<string, unknown>).fusion as Partial<FusionConfig>) ?? {};
+        // fallback_chain intentionally excludes the routed primary (single-shot
+        // retry semantics), but a fusion panel wants the best candidate too —
+        // re-inject it ahead of the chain before panel selection.
+        decision.fallback_chain = [
+          {
+            provider: decision.provider.id,
+            model: decision.model,
+            key_id: decision.key.id,
+            priority: 0,
+            reason: "fusion-primary",
+            score: (decision.metadata as Record<string, unknown> | undefined)?.score as number | undefined,
+          } as unknown as typeof decision.fallback_chain[number],
+          ...decision.fallback_chain,
+        ];
+        const fr = await runFusion({ ...body, stream: false } as typeof body, { ...storedCfg, ...inlineCfg }, decision);
+        await requestLogger.logComplete(
+          vRequestId, "fusion", "fusion", 0, undefined, body, fr.response,
+          Date.now() - vStart, 200, undefined, true,
+          fr.metadata.panelSize, fr.metadata.judgeUsed, fr.metadata.strategy,
+        );
+        if (body.stream) {
+          return sseFromResponse(fr.response as unknown as Record<string, unknown>, body.model);
+        }
+        return c.json({
+          ...fr.response,
+          _fusion: {
+            ...fr.metadata,
+            panel: fr.panelResponses.map((p) => ({
+              platform: p.member.provider,
+              model: p.member.model,
+              latency_ms: p.latencyMs,
+              error: p.error ?? null,
+            })),
+          },
+        });
+      }
+      const res = await executeWithFallback(body, ctx);
+      const statusCode = res.error ? (res.status ?? 502) : 200;
+      await requestLogger.logComplete(
+        vRequestId, "auto", "auto", 0, undefined, body, res.response ?? null,
+        Date.now() - vStart, statusCode, res.error,
+      );
+      if (res.error) return c.json({ error: res.error }, statusCode as 400 | 500 | 502 | 503);
+      if (body.stream && (res as { stream?: unknown }).stream) {
+        return sseFromStream((res as { stream: unknown }).stream);
+      }
+      if (body.stream) {
+        return sseFromResponse((res.response ?? null) as Record<string, unknown> | null, body.model);
+      }
+      return c.json(res.response);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await requestLogger.logComplete(
+        vRequestId, body.model, body.model, 0, undefined, body, null,
+        Date.now() - vStart, 503, msg,
+      );
+      return c.json({ error: `${body.model} routing failed: ${msg}` }, 503);
+    }
   }
 
   const allKeys = await loadKeys(db);
@@ -136,24 +268,69 @@ chatRouter.post("/chat/completions", async (c) => {
     return c.json({ error: result.error }, status);
   }
 
-  // Handle streaming response - collect and return final for now
+  // Real SSE pass-through when the client asked for a stream.
   if (body.stream && result.stream) {
-    const chunks: any[] = [];
-    try {
-      for await (const chunk of result.stream) {
-        chunks.push(chunk);
-      }
-    } catch (err) {
-      console.error("[chat] Stream collection error:", err);
-      return c.json({ error: "Stream collection failed" }, 500);
-    }
+    const encoder = new TextEncoder();
+    const modelTag = result.response?.model ?? body.model;
+    const created = Math.floor(Date.now() / 1000);
+    const source = result.stream as unknown as ReadableStream<Uint8Array> & {
+      [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
+    };
+    const body_stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          const reader = typeof (source as any).getReader === "function"
+            ? (source as ReadableStream<Uint8Array>).getReader()
+            : null;
+          const emit = (payload: unknown) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+          };
+          if (reader) {
+            // Adapter hands back a raw upstream byte stream (already SSE frames).
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) controller.enqueue(value);
+            }
+          } else {
+            // Adapter hands back a parsed chunk async-iterator.
+            const it = (source as any)[Symbol.asyncIterator]
+              ? (source as any)[Symbol.asyncIterator]()
+              : (source as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+            for (;;) {
+              const { done, value } = await it.next();
+              if (done) break;
+              if (value) emit(value);
+            }
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          }
+        } catch (err) {
+          console.error("[chat] Stream error:", err);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(err) })}\n\n`));
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        }
+        controller.close();
+      },
+    });
+    return new Response(body_stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  }
 
-    // Return the last chunk as the final response
-    const finalChunk = chunks[chunks.length - 1];
-    if (finalChunk) {
-      return c.json(finalChunk);
-    }
-    return c.json({ error: "No chunks received" }, 500);
+  if (body.stream && !result.stream) {
+    // Upstream answered non-streamed; synthesize one SSE frame so clients
+    // never see an empty 200 when they asked for a stream.
+    const frame = result.response ?? { choices: [] };
+    return c.body(
+      `data: ${JSON.stringify({ ...frame, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: result.response?.model ?? body.model })}\n\ndata: [DONE]\n\n`,
+      200,
+      { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache" },
+    );
   }
 
   return c.json(result.response);

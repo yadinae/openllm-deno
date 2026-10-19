@@ -80,14 +80,16 @@ async function getKeyById(keyId: string): Promise<ApiKey | null> {
     const keys = await listApiKeys();
     const key = keys.find(k => String(k.db_id ?? k.id) === keyId || k.platform === keyId);
     if (key) {
+      const { decryptSecret } = await import("./router.ts");
       const apiKey: ApiKey = {
         id: key.id,
         db_id: key.db_id,
         platform: key.platform,
         label: key.label ?? key.platform,
-        encrypted_key: key.encrypted_key ?? "",
-        iv: key.iv ?? "",
-        auth_tag: key.auth_tag ?? "",
+        // provider.chat() sends encrypted_key as the Bearer token — decrypt first.
+        encrypted_key: await decryptSecret({ encrypted_key: key.encrypted_key, iv: key.iv, auth_tag: key.auth_tag }),
+        iv: "",
+        auth_tag: "",
         status: key.status as "healthy" | "error" | "rate_limited" | "invalid",
         enabled: key.enabled,
         base_url: key.base_url ?? "",
@@ -513,6 +515,13 @@ export async function runFusion(
 
   // 2. Fan-out to panel
   const panelResponses = await fanOutPanel(panel, request, finalConfig, clientProfile);
+  {
+    const okCount = panelResponses.filter((pr) => pr.response?.choices?.[0]?.message?.content).length;
+    console.log(`[fusion] panel ${okCount}/${panelResponses.length} usable`);
+    for (const pr of panelResponses) {
+      if (pr.error) console.warn(`[fusion] member ${pr.member.provider}/${pr.member.model} failed: ${String(pr.error).slice(0, 140)}`);
+    }
+  }
 
   // 3. Check for tool calls - panel voting
   const toolChoice = request.tool_choice as "auto" | "required" | "none" | undefined;

@@ -111,6 +111,11 @@ try {
   console.log(`[deploy] staged ${staged.length} files in ${tmp}`);
   console.log(`[deploy]   db/data.json seed: ${hasSeed ? "included" : "excluded"} | dist/: ${hasDist ? "included" : "MISSING"}`);
 
+  if (!hasDist) {
+    console.error("[deploy] ERROR: dist/ is missing — the SPA will 404. Run `deno task build` first (or `npm run build` in the frontend).");
+    Deno.exit(1);
+  }
+
   if (dryRun) {
     for (const f of staged.sort()) console.log("  ", f);
     console.log("[deploy] --dry-run: not deploying.");

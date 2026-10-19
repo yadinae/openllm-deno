@@ -239,8 +239,8 @@ export class RequestLogger {
             ${entry.request_id}, ${entry.timestamp}, ${entry.platform}, ${entry.model},
             ${entry.key_id}, ${entry.client_id ?? null}, ${entry.input_tokens},
             ${entry.output_tokens}, ${entry.total_tokens}, ${entry.latency_ms},
-            ${entry.status_code}, ${entry.error ?? null}, ${entry.fused},
-            ${entry.panel_size ?? null}, ${entry.judge_used ?? false},
+            ${entry.status_code}, ${entry.error ?? null}, ${entry.fused ? 1 : 0},
+            ${entry.panel_size ?? null}, ${entry.judge_used ? 1 : 0},
             ${entry.strategy ?? null}
           )
           ON CONFLICT (request_id) DO UPDATE SET
@@ -292,6 +292,7 @@ export class RequestLogger {
     try {
       await initDb();
       
+      const oneMinuteAgo = new Date(Date.now() - 60_000).toISOString();
       const [basic, byPlatform, byModel, byError, latencies] = await Promise.all([
         // Basic aggregates
         query`
@@ -303,8 +304,8 @@ export class RequestLogger {
             SUM(input_tokens) as total_input_tokens,
             SUM(output_tokens) as total_output_tokens,
             SUM(total_tokens) as total_tokens,
-            COUNT(*) FILTER (WHERE timestamp >= NOW() - INTERVAL '1 minute') as rpm,
-            SUM(total_tokens) FILTER (WHERE timestamp >= NOW() - INTERVAL '1 minute') as tpm
+            COUNT(*) FILTER (WHERE timestamp >= ${oneMinuteAgo}) as rpm,
+            SUM(total_tokens) FILTER (WHERE timestamp >= ${oneMinuteAgo}) as tpm
           FROM requests
           WHERE timestamp >= ${range.from.toISOString()} AND timestamp <= ${range.to.toISOString()}
         `,

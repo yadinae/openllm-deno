@@ -4,6 +4,7 @@
 
 | 日期 | 主题 | 类型 | 文件 |
 |---|---|---|---|
+| 2026-10-19 | `dist/ not found` 连发两次：必须用 `scripts/deploy.ts` 部署 | 踩坑/规范 | [2026-10-19-dist-not-found-deploy-script-mandatory.md](2026-10-19-dist-not-found-deploy-script-mandatory.md) |
 | 2026-10-18 | 登录恒 "Invalid email or password"：改用 users/scrypt 对齐 FreeLLMAPI 账本 | 踩坑/修复 | [2026-10-18-dashboard-auth-users-scrypt-alignment.md](2026-10-18-dashboard-auth-users-scrypt-alignment.md) |
 | 2026-10-18 | 无头浏览器逐页验证 SPA：端点"200 但形状不对"是主要故障源 | 踩坑/修复 | [2026-10-18-headless-browser-page-verification-shape-mismatches.md](2026-10-18-headless-browser-page-verification-shape-mismatches.md) |
 | 2026-10-18 | 补齐 ~40 个 dashboard 端点 + /api 会话网关 + 键 CRUD 契约修正 | 决策/实现 | [2026-10-18-dashboard-remaining-endpoints-session-gate-and-key-crud.md](2026-10-18-dashboard-remaining-endpoints-session-gate-and-key-crud.md) |

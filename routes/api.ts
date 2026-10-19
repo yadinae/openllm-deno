@@ -262,13 +262,44 @@ api.get("/keys/platform/custom", async (c) => {
 // ── Phase 2: Models ───────────────────────────────────────────────────────────
 api.get("/models", async (c) => {
   const models = await getDiscoveredModels();
-  return c.json(models);
+
+  // Enrich with keyCount from enabled keys per platform (SPA filters keyCount > 0)
+  const keys = await listApiKeys();
+  const enabledKeysByPlatform = new Map<string, number>();
+  for (const k of keys) {
+    if (k.enabled) {
+      enabledKeysByPlatform.set(k.platform, (enabledKeysByPlatform.get(k.platform) ?? 0) + 1);
+    }
+  }
+
+  const enriched = models.map(m => ({
+    ...m,
+    keyCount: m.platform ? (enabledKeysByPlatform.get(m.platform) ?? 0) : 0,
+  }));
+
+  return c.json(enriched);
 });
 
 api.get("/models/free", async (c) => {
   const models = await getDiscoveredModels();
-  const free = models.filter(m => m.isFree);
-  return c.json(free);
+
+  // Enrich with keyCount from enabled keys per platform
+  const keys = await listApiKeys();
+  const enabledKeysByPlatform = new Map<string, number>();
+  for (const k of keys) {
+    if (k.enabled) {
+      enabledKeysByPlatform.set(k.platform, (enabledKeysByPlatform.get(k.platform) ?? 0) + 1);
+    }
+  }
+
+  const enriched = models
+    .filter(m => m.isFree)
+    .map(m => ({
+      ...m,
+      keyCount: m.platform ? (enabledKeysByPlatform.get(m.platform) ?? 0) : 0,
+    }));
+
+  return c.json(enriched);
 });
 
 api.post("/models", async (c) => {
@@ -301,7 +332,36 @@ api.post("/models", async (c) => {
 // (the SPA filters it by keyCount/enabled); PUT replaces it.
 api.get("/fallback", async (c) => {
   const chain = await getSetting<unknown[]>("fallback-config");
-  return c.json(Array.isArray(chain) ? chain : []);
+  const rawChain = Array.isArray(chain) ? chain : [];
+
+  // Enrich with keyCount from enabled keys per platform (SPA filters keyCount > 0)
+  const keys = await listApiKeys();
+  const enabledKeysByPlatform = new Map<string, number>();
+  for (const k of keys) {
+    if (k.enabled) {
+      enabledKeysByPlatform.set(k.platform, (enabledKeysByPlatform.get(k.platform) ?? 0) + 1);
+    }
+  }
+
+  const enriched = rawChain.map((entry: unknown, idx: number) => {
+    const e = entry as Record<string, unknown>;
+    const platform = String(e.platform ?? e.provider ?? "");
+    const modelId = String(e.modelId ?? e.model_id ?? e.id ?? `model-${idx}`);
+    const keyCount = platform ? (enabledKeysByPlatform.get(platform) ?? 0) : 0;
+    return {
+      ...e,
+      // SPA-required fields for filtering & rendering
+      modelDbId: e.modelDbId ?? modelId,
+      platform,
+      modelId,
+      enabled: e.enabled ?? true,
+      keyCount,
+      keyLabel: e.keyLabel ?? (platform ? (keys.find(k => k.platform === platform)?.label ?? platform) : ""),
+      priority: typeof e.priority === "number" ? e.priority : idx + 1,
+    };
+  });
+
+  return c.json(enriched);
 });
 
 api.get("/fallback/routing", async (c) => {
