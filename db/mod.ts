@@ -41,6 +41,8 @@ export interface DbEntry {
   status?: string;
   enabled: boolean;
   base_url?: string;
+  monthly_request_cap?: number;
+  monthly_token_cap?: number;
 }
 
 export interface DiscoveredModel {

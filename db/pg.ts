@@ -19,6 +19,8 @@ export interface DbEntry {
   status?: string;
   enabled: boolean;
   base_url?: string;
+  monthly_request_cap?: number;
+  monthly_token_cap?: number;
 }
 
 export interface DiscoveredModel {
@@ -745,6 +747,8 @@ function rowToEntry(r: Record<string, unknown>): DbEntry {
     status: r.status == null ? undefined : String(r.status),
     enabled: Boolean(r.enabled),
     base_url: r.base_url == null ? undefined : String(r.base_url),
+    monthly_request_cap: r.monthly_request_cap != null ? Number(r.monthly_request_cap) : undefined,
+    monthly_token_cap: r.monthly_token_cap != null ? Number(r.monthly_token_cap) : undefined,
   };
 }
 

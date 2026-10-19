@@ -19,6 +19,14 @@ import { apiCompat } from "./routes/api.ts";
 import { authRouter, ensureSetupCodeLogged } from "./routes/auth.ts";
 import { dashboardRouter } from "./routes/dashboard.ts";
 import { premiumRouter } from "./routes/premium.ts";
+// P1 inbound protocol gateways
+import anthropicRouter from "./routes/anthropic.ts";
+import responsesRouter from "./routes/responses.ts";
+import moderationsRouter from "./routes/moderations.ts";
+import embeddingsRouter from "./routes/embeddings.ts";
+import mediaRouter from "./routes/media.ts";
+import rerankRouter from "./routes/rerank.ts";
+import ollamaRouter from "./routes/ollama.ts";
 import {
   initDb as initPg,
   listApiKeys,
@@ -158,6 +166,17 @@ app.use("/api/*", async (c, next) => {
 
 app.route("/v1", chatRouter);
 app.get("/v1/models", getModels);
+
+// P1 inbound protocol gateways (mounted under /v1 for OpenAI-compatible ones)
+app.route("/v1", anthropicRouter);      // /v1/messages
+app.route("/v1", responsesRouter);      // /v1/responses
+app.route("/v1", moderationsRouter);    // /v1/moderations
+app.route("/v1", embeddingsRouter);     // /v1/embeddings, /v1/embeddings/models
+app.route("/v1", mediaRouter);          // /v1/images/generations, /v1/audio/speech, /v1/models, /v1/modalities
+app.route("/v1", rerankRouter);         // /v1/rerank
+
+// Ollama inbound (mounted at /v1/ollama for API key auth)
+app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api/chat, etc.
 
 // ── Dashboard API (contract-compliant layer) ─────────────────────────────────
 
