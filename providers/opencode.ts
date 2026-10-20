@@ -187,8 +187,27 @@ export class OpencodeAdapter implements ProviderAdapter {
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
+        // Upstream providers sometimes return JSON errors with various shapes.
+        // Try to parse and extract a clean message; fall back to raw text.
+        let message = text.slice(0, 500);
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed.error?.message) {
+            message = parsed.error.message;
+          } else if (parsed.error?.detail) {
+            message = parsed.error.detail;
+          } else if (parsed.message) {
+            message = parsed.message;
+          } else if (parsed.detail) {
+            message = parsed.detail;
+          } else if (typeof parsed === "string") {
+            message = parsed;
+          }
+        } catch {
+          // Not JSON, use raw text
+        }
         return {
-          error: text.slice(0, 500),
+          error: message,
           status: res.status,
           latency_ms,
         };

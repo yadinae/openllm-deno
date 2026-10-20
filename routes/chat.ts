@@ -40,7 +40,7 @@ function sseFromStream(stream: unknown): Response {
         }
       } catch (err) {
         console.error("[chat] Stream error:", err);
-        controller.enqueue(encoder.encode("data: " + JSON.stringify({ error: String(err) }) + "\n\n"));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: { type: "server_error", message: String(err) } })}\n\n`));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       }
       controller.close();
@@ -163,7 +163,21 @@ chatRouter.post("/chat/completions", async (c) => {
         vRequestId, "auto", "auto", 0, undefined, body, res.response ?? null,
         Date.now() - vStart, statusCode, res.error,
       );
-      if (res.error) return c.json({ error: res.error }, statusCode as 400 | 500 | 502 | 503);
+      if (res.error) {
+        // Standard error shape: { error: { message, type } }. The SPA reads
+        // err.error?.message; a bare string made every failure read as
+        // "unknown error" because the message was unreachable.
+        const detail = res.error;
+        return c.json({
+          error: {
+            type: statusCode >= 500 ? "server_error" : "invalid_request_error",
+            message: detail,
+            ...(res.provider_metadata?.exhausted_chain
+              ? { exhausted_chain: true, attempts: res.provider_metadata.attempts }
+              : {}),
+          },
+        }, statusCode as 400 | 500 | 502 | 503);
+      }
       if (body.stream && (res as { stream?: unknown }).stream) {
         return sseFromStream((res as { stream: unknown }).stream);
       }
@@ -177,7 +191,12 @@ chatRouter.post("/chat/completions", async (c) => {
         vRequestId, body.model, body.model, 0, undefined, body, null,
         Date.now() - vStart, 503, msg,
       );
-      return c.json({ error: `${body.model} routing failed: ${msg}` }, 503);
+      return c.json({
+        error: {
+          type: "server_error",
+          message: `${body.model} routing failed: ${msg}`,
+        },
+      }, 503);
     }
   }
 
@@ -265,7 +284,12 @@ chatRouter.post("/chat/completions", async (c) => {
 
   if (result.error) {
     const status = (result.status ?? 500) as 400 | 500 | 502 | 503;
-    return c.json({ error: result.error }, status);
+    return c.json({
+      error: {
+        type: status >= 500 ? "server_error" : "invalid_request_error",
+        message: result.error,
+      },
+    }, status);
   }
 
   // Real SSE pass-through when the client asked for a stream.

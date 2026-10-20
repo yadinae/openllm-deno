@@ -1,4 +1,7 @@
 # 笔记索引
+| 2026-10-20 | auto 不是筛选免费模型而是抓上游列表头 8 个 + 错误形状导致未知错误 | 踩坑/修复 | [2026-10-20-auto-routing-free-models.md](2026-10-20-auto-routing-free-models.md) |
+| 2026-10-20 | 智能体页 i.filter is not a function + 试验场 未知错误 + 登录重置 | 踩坑/修复 | [2026-10-20-agents-playground-fixes.md](2026-10-20-agents-playground-fixes.md) |
+| 2026-10-20 | 智能体页 i.filter is not a function：analytics 端点返回包裹对象崩 SPA .filter | 踩坑/修复 | [2026-10-20-agents-page-analytics-envelope-crash.md](2026-10-20-agents-page-analytics-envelope-crash.md) |
 
 按时间倒序。每篇是一次技术问答的 `问题 / 权衡 / 结论` 摘要。
 

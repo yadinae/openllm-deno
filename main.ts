@@ -12,6 +12,7 @@
  */
 
 import { Hono } from "hono";
+import type { Context, Next } from "hono";
 import { getDb, loadDb, setEncryptionKey, hasEncryptionKey, type DbData } from "./db/mod.ts";
 import { chatRouter } from "./routes/chat.ts";
 import { getModels } from "./routes/models.ts";
@@ -136,7 +137,8 @@ console.log("[openllm] provider registry initialized with built-in providers");
 
 // ── Request Logger Initialization ──────────────────────────────────────────────
 
-import { requestLogger } from "./services/request-log.ts";
+import { requestLogger, setClientMeta } from "./services/request-log.ts";
+import { classifyClientAgent } from "./services/client-classifier.ts";
 requestLogger.start();
 console.log("[openllm] request logger started (batch flush every 5s)");
 
@@ -144,6 +146,26 @@ console.log("[openllm] request logger started (batch flush every 5s)");
 
 app.use("*", async (c, next) => {
   c.set("db", getDb());
+  await next();
+});
+
+// Caller identity for analytics: which coding agent made this call, and from
+// where. Every client shares the unified gateway key, so the User-Agent (plus
+// the forwarded ip) is the only per-caller signal — /agents and /analytics group
+// by it. Must run before the /v1 routers so their log calls see it.
+app.use("*", async (c, next) => {
+  const ua = c.req.header("user-agent") ?? "";
+  const xff = (c.req.header("x-forwarded-for") ?? "").split(",")[0]?.trim() ?? "";
+  setClientMeta({
+    clientAgent: classifyClientAgent({
+      path: c.req.path,
+      userAgent: ua,
+      claudeCodeSessionId: c.req.header("x-claude-code-session-id"),
+      sessionId: c.req.header("x-session-id"),
+    }),
+    clientIp: xff || undefined,
+    clientUserAgent: ua ? ua.slice(0, 300) : undefined,
+  });
   await next();
 });
 

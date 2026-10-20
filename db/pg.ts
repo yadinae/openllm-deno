@@ -127,6 +127,14 @@ CREATE TABLE IF NOT EXISTS requests (
   panel_size    INTEGER,
   judge_used    INTEGER NOT NULL DEFAULT 0,
   strategy      TEXT,
+  -- Caller identity (services/client-classifier.ts) - /agents groups by
+  -- client_agent. All clients share the unified key so ip + raw UA are the
+  -- only per-caller discriminators.
+  client_agent  TEXT,
+  client_ip     TEXT,
+  client_user_agent TEXT,
+  request_type  TEXT,
+  requested_model   TEXT,
   created_at    TEXT NOT NULL DEFAULT (now()::text)
 );
 -- Indexes for requests table moved to MIGRATIONS to run after ALTER TABLE
@@ -559,8 +567,16 @@ const MIGRATIONS: string[] = [
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS panel_size INTEGER",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS judge_used INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS strategy TEXT",
+  // requests: caller identity, so /agents and /analytics can attribute traffic
+  // (all clients share the unified key — the UA and ip are the discriminators).
+  "ALTER TABLE requests ADD COLUMN IF NOT EXISTS client_agent TEXT",
+  "ALTER TABLE requests ADD COLUMN IF NOT EXISTS client_ip TEXT",
+  "ALTER TABLE requests ADD COLUMN IF NOT EXISTS client_user_agent TEXT",
+  "ALTER TABLE requests ADD COLUMN IF NOT EXISTS request_type TEXT",
+  "ALTER TABLE requests ADD COLUMN IF NOT EXISTS requested_model TEXT",
   // requests table indexes (created after columns exist)
   "CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp)",
+  "CREATE INDEX IF NOT EXISTS idx_requests_client_agent ON requests(client_agent)",
   "CREATE INDEX IF NOT EXISTS idx_requests_platform ON requests(platform)",
   "CREATE INDEX IF NOT EXISTS idx_requests_model ON requests(model)",
   "CREATE INDEX IF NOT EXISTS idx_requests_request_id ON requests(request_id)",

@@ -261,3 +261,6 @@ authRouter.post("/reset-password", async (c) => {
   await deleteUserSessions(user.id);
   return c.json(await issueSession(user.id, user.email));
 });
+
+
+export default authRouter;

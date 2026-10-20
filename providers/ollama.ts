@@ -59,7 +59,26 @@ export class OllamaAdapter implements ProviderAdapter {
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        return { error: `Ollama ${res.status}: ${text.slice(0, 300)}`, status: res.status, latency_ms };
+        // Upstream providers sometimes return JSON errors with various shapes.
+        // Try to parse and extract a clean message; fall back to raw text.
+        let message = text.slice(0, 300);
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed.error?.message) {
+            message = parsed.error.message;
+          } else if (parsed.error?.detail) {
+            message = parsed.error.detail;
+          } else if (parsed.message) {
+            message = parsed.message;
+          } else if (parsed.detail) {
+            message = parsed.detail;
+          } else if (typeof parsed === "string") {
+            message = parsed;
+          }
+        } catch {
+          // Not JSON, use raw text
+        }
+        return { error: `Ollama ${res.status}: ${message}`, status: res.status, latency_ms };
       }
 
       if (request.stream) {

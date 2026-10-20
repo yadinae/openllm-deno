@@ -30,6 +30,10 @@ interface CachedMetrics {
 const PROVIDER_MODEL_CACHE = new Map<string, { at: number; models: ModelInfo[] }>();
 const PROVIDER_MODEL_TTL_MS = 10 * 60 * 1000; // upstream /models lists change rarely
 
+/** `auto` free-first bias, applied in calculateScore. Must exceed the score
+ * spread between two healthy candidates so freeness decides. */
+const FREE_PREFERENCE = 0.25;
+
 const METRICS_CACHE = new Map<string, CachedMetrics>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -94,7 +98,7 @@ export class SmartRouter {
       fallback_chain: fallbackChain,
       metadata: {
         score: primary.score,
-        reason: `bandit-top1 (latency:${primary.metrics.latency_p50}ms cost:$${primary.metrics.cost_per_1k}/1k quality:${primary.metrics.quality_score} reliability:${primary.metrics.success_rate})`,
+        reason: `bandit-top1 ${primary.free ? "FREE" : "paid"} (latency:${primary.metrics.latency_p50}ms cost:$${primary.metrics.cost_per_1k}/1k quality:${primary.metrics.quality_score} reliability:${primary.metrics.success_rate})`,
       },
     };
   }
@@ -148,6 +152,9 @@ export class SmartRouter {
     const preferredProvider = ctx.preferred_provider;
     const excludedProviders = new Set(ctx.excluded_providers ?? []);
 
+    // Virtual model names never match a concrete catalog id.
+    const virtualModel = ctx.request.model === "auto" || ctx.request.model === "fusion";
+
     // For each key, get provider adapter and supported models
     for (const key of dbKeys) {
       if (excludedProviders.has(key.platform)) continue;
@@ -155,30 +162,33 @@ export class SmartRouter {
       const adapter = providerRegistry.get(key.platform);
       if (!adapter) continue;
 
-      // Virtual model names never match a concrete catalog id — every
-      // (provider, model) pair is a legitimate candidate for them.
-      const virtualModel = ctx.request.model === "auto" || ctx.request.model === "fusion";
-
       // Check cooldown
       if (await this.isInCooldown(key.platform, key.id)) continue;
 
-      // Get models this provider supports. Cap per-platform breadth: without a
-      // limit an `auto` request scores every catalogued model on every key
-      // (500+ candidates) and pays a metrics lookup per candidate on cold cache.
-      const allModels = await this.getProviderModels(adapter, key.platform);
-      const models = allModels.slice(0, 8);
-      
-      for (const model of models) {
-        // Non-chat models (guard/embed/audio/image) pass curated ranks but
-        // answer chat with scores or 400s — never route to them.
-        if (NON_CHAT_MODEL_RE.test(model.id)) continue;
-        if (CLIENT_LOCKED_MODEL_RE.test(model.id)) continue;
+      // Filter by preferred provider (if specified, only include that provider)
+      if (preferredProvider && key.platform !== preferredProvider) continue;
 
+      // Candidates come from the curated catalog — ranked, chat-capable, with
+      // freeness resolved — never from the raw upstream /models order, which is
+      // arbitrary and let a TTS model become the routed primary.
+      let models: RoutableModel[] = [];
+      if (virtualModel) {
+        models = await loadRoutableModels(key.platform);
+      } else {
+        const requested = ctx.request.model ?? "";
+        const known = await resolveRequestedModel(key.platform, requested);
+        if (known) {
+          models = [known];
+        } else if (await this.providerServesModel(key.platform, requested)) {
+          // The provider lists it but the catalog has no row yet: still servable,
+          // just with unknown price.
+          models = [{ id: requested.replace(`${key.platform}/`, ""), free: false }];
+        }
+      }
+
+      for (const model of models) {
         // Filter by client profile model scope
         if (allowedModels && !allowedModels.includes(model.id)) continue;
-
-        // Filter by preferred provider (if specified, only include that provider)
-        if (preferredProvider && key.platform !== preferredProvider) continue;
 
         // Check if model matches request (for model-specific routing)
         if (!virtualModel && ctx.request.model && !this.modelMatches(ctx.request.model, model.id, key.platform)) {
@@ -190,6 +200,7 @@ export class SmartRouter {
           model: model.id,
           key,
           platform: key.platform,
+          free: model.free,
           metrics: await this.getMetrics(key.platform, model.id),
         });
       }
@@ -211,12 +222,16 @@ export class SmartRouter {
       quality: 0.30,
       reliability: 0.20,
     };
+    const virtualTRGL = ctx.request.model === "auto" || ctx.request.model === "fusion";
 
     // Normalize latency (lower is better): assume 0-10000ms range
     const latencyScore = Math.max(0, 1 - m.latency_p50 / 10000);
 
-    // Normalize cost (lower is better): assume $0-10/1k range
-    const costScore = Math.max(0, 1 - m.cost_per_1k / 10);
+    // Normalize cost (lower is better): assume $0-10/1k range. A positively
+    // known-free model costs 0 — previously cost_per_1k was a constant 0.001,
+    // so this term could never distinguish free from paid.
+    const costPer1k = candidate.free ? 0 : m.cost_per_1k;
+    const costScore = Math.max(0, 1 - costPer1k / 10);
 
     // Quality from model intelligence_rank (0-1, higher is better)
     const qualityScore = m.quality_score;
@@ -234,12 +249,19 @@ export class SmartRouter {
       strategyBias = 0.1 * qualityScore; // Boost quality
     }
 
+    // `auto` means "spend nothing when something free works". The bonus is
+    // larger than the spread latency/quality jitter can produce, so a free
+    // model outranks a paid one — but paid candidates stay in the chain as a
+    // last resort instead of dead-ending when every free model is down.
+    const freePreference = virtualTRGL && candidate.free ? FREE_PREFERENCE : 0;
+
     return (
       weights.latency * latencyScore +
       weights.cost * costScore +
       weights.quality * qualityScore +
       weights.reliability * reliabilityScore +
-      strategyBias
+      strategyBias +
+      freePreference
     );
   }
 
@@ -429,6 +451,16 @@ export class SmartRouter {
     }
   }
 
+  /** True when the provider's own model list contains the requested model. */
+  private async providerServesModel(platform: string, requestModel: string): Promise<boolean> {
+    if (!requestModel) return false;
+    const adapter = getAdapterForPlatform(platform);
+    if (!adapter) return false;
+    const models = await this.getProviderModels(adapter, platform);
+    const bare = requestModel.replace(`${platform}/`, "");
+    return models.some((m) => m.id === bare || m.id === requestModel);
+  }
+
   /** Check if request model matches candidate model */
   private modelMatches(requestModel: string, candidateModel: string, platform: string): boolean {
     // requestModel format: "platform/model-id" or just "model-id"
@@ -467,6 +499,8 @@ interface Candidate {
   model: string;
   key: ApiKey;
   platform: string;
+  /** Positively-known-free (see RoutableModel). */
+  free: boolean;
   metrics: CachedMetrics;
 }
 
@@ -542,8 +576,22 @@ export async function executeWithFallback(
     }
   }
 
-  // All failed - return primary error
-  return primaryResult;
+  // All failed. Surface the last meaningful upstream error with context so the
+  // caller can show the operator WHY the request died instead of a generic
+  // "routing failed" / "unknown error". The primary's error is the most
+  // specific one we have (it is what made us fall back in the first place).
+  const lastError = primaryString(primaryResult.error);
+  const failedResult: ProviderResult = {
+    error: lastError || "No available channel for this request",
+    status: primaryResult.status ?? 502,
+    latency_ms: primaryResult.latency_ms,
+    provider_metadata: {
+      ...primaryResult.provider_metadata,
+      exhausted_chain: true,
+      attempts: [...tried],
+    },
+  };
+  return failedResult;
 }
 
 function primaryString(err: unknown): string {
@@ -581,7 +629,102 @@ async function getKeyById(keyId: string): Promise<ApiKey | null> {
   }
 }
 
-const NON_CHAT_MODEL_RE = /guard|moderation|embed|whisper|\/tts|audio|transcri|dall-e|image|draw|rerank|ocr|realtime|vision-|live\b/i;
+const NON_CHAT_MODEL_RE = /guard|moderation|embed|whisper|\/tts|audio|transcri|dall-e|image|draw|rerank|ocr|realtime|vision-|live\b|orpheus|speech|voice/i;
+
+/** A catalogued model the router is allowed to pick, plus what we know of price. */
+export interface RoutableModel {
+  id: string;
+  /** True only when freeness is POSITIVELY known (catalog says free, discovery
+   * stamped is_free, or the runtime pricing detector confirmed it). Unknown
+   * pricing is deliberately NOT treated as free. */
+  free: boolean;
+}
+
+const ROUTABLE_CACHE = new Map<string, { at: number; models: RoutableModel[] }>();
+const ROUTABLE_TTL_MS = 10 * 60 * 1000;
+/** Ranked cap per platform. Ranked, not head-of-list: an upstream /models
+ * array is in arbitrary order, so a plain slice() let whatever happened to be
+ * first (e.g. groq's Arabic TTS model) become the routed primary. */
+const ROUTABLE_CAP_PER_PLATFORM = 25;
+
+/**
+ * Models this platform may serve, best-first, with freeness resolved.
+ * The curated `models` table is the allowlist (operator-approved, chat-capable,
+ * quality-ranked); discovery only contributes models it positively knows are free.
+ */
+export async function loadRoutableModels(platform: string): Promise<RoutableModel[]> {
+  const cached = ROUTABLE_CACHE.get(platform);
+  if (cached && Date.now() - cached.at < ROUTABLE_TTL_MS) return cached.models;
+
+  const out = new Map<string, RoutableModel>();
+  try {
+    await initDb();
+    const curated = await query`
+      SELECT model_id AS mid,
+             (paid_input_per_m IS NOT NULL AND paid_input_per_m > 0) AS paid
+        FROM models
+       WHERE platform = ${platform} AND enabled = 1
+       ORDER BY (paid_input_per_m IS NULL OR paid_input_per_m = 0) DESC NULLS LAST,
+                intelligence_rank DESC NULLS LAST
+       LIMIT ${ROUTABLE_CAP_PER_PLATFORM * 3}
+    `;
+    for (const r of curated as any[]) {
+      if (r.mid) out.set(r.mid, { id: r.mid, free: !r.paid });
+    }
+    const disc = await query`
+      SELECT model_id AS mid FROM discovered_models
+       WHERE platform = ${platform} AND enabled = true AND is_free = true
+    `;
+    for (const r of disc as any[]) {
+      if (!r.mid) continue;
+      const prev = out.get(r.mid);
+      if (prev) prev.free = true;
+      else out.set(r.mid, { id: r.mid, free: true });
+    }
+  } catch (e) {
+    console.warn(`[router] loadRoutableModels(${platform}) catalog failed:`, e instanceof Error ? e.message : e);
+  }
+
+  // Runtime pricing detector, best-effort: confirms free models the catalog
+  // lists without a price stamp.
+  try {
+    const { getFreeModelsCached } = await import("../providers/free-detect-service.ts");
+    for (const id of await getFreeModelsCached(platform)) {
+      const prev = out.get(id);
+      if (prev) prev.free = true;
+      else out.set(id, { id, free: true });
+    }
+  } catch { /* optional enhancement */ }
+
+  const models = [...out.values()]
+    .filter((m) => !NON_CHAT_MODEL_RE.test(m.id) && !CLIENT_LOCKED_MODEL_RE.test(m.id))
+    .slice(0, ROUTABLE_CAP_PER_PLATFORM);
+  if (models.length > 0) ROUTABLE_CACHE.set(platform, { at: Date.now(), models });
+  return models;
+}
+
+/** Resolve an explicitly requested model against the catalog for this platform. */
+async function resolveRequestedModel(platform: string, requestModel: string): Promise<RoutableModel | null> {
+  const routable = await loadRoutableModels(platform);
+  const hit = routable.find((m) => {
+    const bare = m.id;
+    return requestModel === bare || requestModel === `${platform}/${bare}`
+      || requestModel.split("/").slice(1).join("/") === bare;
+  });
+  if (hit) return hit;
+  try {
+    await initDb();
+    const rows = await query`
+      SELECT model_id AS mid,
+             (paid_input_per_m IS NOT NULL AND paid_input_per_m > 0) AS paid
+        FROM models
+       WHERE platform = ${platform} AND model_id = ${requestModel.replace(`${platform}/`, "")}
+       LIMIT 1
+    `;
+    if (rows.length > 0) return { id: (rows[0] as any).mid, free: !(rows[0] as any).paid };
+  } catch { /* catalog unavailable */ }
+  return null;
+}
 
 /** OpenCode zen "-free" models are client-locked to the OpenCode IDE
  * (FreeTierError from any API caller) — never viable as routing targets. */

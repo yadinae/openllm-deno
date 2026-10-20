@@ -4,9 +4,53 @@
  * P-CORE-005: 请求日志必须落库并驱动 /api/analytics 真实数据，不再返回空值
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { query, initDb } from "../db/pg.ts";
 import type { ChatCompletionRequest, ChatCompletionResponse } from "../providers/types.ts";
 import { broadcastLog, broadcastMetrics } from "../routes/ws-observability.ts";
+
+/**
+ * Per-request caller identity, captured once by the middleware in main.ts and
+ * read here so every route's log call records it without threading a context
+ * object through ~10 call sites (`/agents` and `/analytics` group by it).
+ * Streaming tails that resume outside the request's async chain lose the store
+ * and fall back to `unknown` — a degraded label, never a wrong one.
+ */
+export interface ClientMeta {
+  clientAgent?: string;
+  clientIp?: string;
+  clientUserAgent?: string;
+  requestType?: string;
+}
+
+export const clientMetaStore = new AsyncLocalStorage<ClientMeta>();
+
+/** Bind the caller identity to the current async chain (request middleware). */
+export function setClientMeta(meta: ClientMeta): void {
+  clientMetaStore.enterWith(meta);
+}
+
+/** Chat vs embedding — the only two request types the dashboard splits out. */
+export function requestTypeForPlatform(platform: string): string {
+  const p = (platform ?? "").toLowerCase();
+  if (p === "embeddings") return "embedding";
+  if (p === "media" || p === "images" || p === "image") return "image";
+  if (p === "audio" || p === "transcription" || p === "tts" || p === "stt") return "audio";
+  if (p === "rerank") return "rerank";
+  if (p === "search") return "search";
+  return "chat";
+}
+
+/**
+ * The model the client pinned, or null when it asked the router to choose.
+ * Analytics counts `requested_model IS NOT NULL` as a pinned request, so
+ * 'auto'/'fusion' — the two ways to say "you pick" — must not be recorded.
+ */
+export function requestedModelFrom(requested: string | undefined | null): string | null {
+  const m = (requested ?? "").trim();
+  if (!m || m === "auto" || m === "fusion" || m === "auto/free") return null;
+  return m;
+}
 
 /** Request log entry */
 export interface RequestLogEntry {
@@ -148,8 +192,13 @@ export class RequestLogger {
     fused: boolean = false,
     panelSize?: number,
     judgeUsed?: boolean,
-    strategy?: string
+    strategy?: string,
+    /** Model the client named in the request; 'auto'/'fusion' are not pins. */
+    requestedModel?: string | null
   ): Promise<void> {
+    // Caller identity rides in via the async-local store set by the request
+    // middleware, so no route has to thread it through its log call.
+    const meta = clientMetaStore.getStore() ?? {};
     const entry: RequestLogData = {
       request_id: requestId,
       timestamp: new Date().toISOString(),
@@ -167,6 +216,11 @@ export class RequestLogger {
       panel_size: panelSize,
       judge_used: judgeUsed,
       strategy,
+      client_agent: meta.clientAgent,
+      client_ip: meta.clientIp,
+      client_user_agent: meta.clientUserAgent,
+      request_type: meta.requestType ?? requestTypeForPlatform(platform),
+      requested_model: requestedModel,
       phase: "response",
     };
     this.batchBuffer.push(entry);
@@ -209,7 +263,8 @@ export class RequestLogger {
       fused,
       panelSize,
       judgeUsed,
-      strategy
+      strategy,
+      requestedModelFrom(request?.model)
     );
   }
 
@@ -234,14 +289,18 @@ export class RequestLogger {
           INSERT INTO requests (
             request_id, timestamp, platform, model, key_id, client_id,
             input_tokens, output_tokens, total_tokens, latency_ms,
-            status_code, error, fused, panel_size, judge_used, strategy
+            status_code, error, fused, panel_size, judge_used, strategy,
+            client_agent, client_ip, client_user_agent, request_type, requested_model
           ) VALUES (
             ${entry.request_id}, ${entry.timestamp}, ${entry.platform}, ${entry.model},
             ${entry.key_id}, ${entry.client_id ?? null}, ${entry.input_tokens},
             ${entry.output_tokens}, ${entry.total_tokens}, ${entry.latency_ms},
             ${entry.status_code}, ${entry.error ?? null}, ${entry.fused ? 1 : 0},
             ${entry.panel_size ?? null}, ${entry.judge_used ? 1 : 0},
-            ${entry.strategy ?? null}
+            ${entry.strategy ?? null},
+            ${entry.client_agent ?? null}, ${entry.client_ip ?? null},
+            ${entry.client_user_agent ?? null}, ${entry.request_type ?? null},
+            ${entry.requested_model ?? null}
           )
           ON CONFLICT (request_id) DO UPDATE SET
             output_tokens = EXCLUDED.output_tokens,
@@ -252,7 +311,12 @@ export class RequestLogger {
             fused = EXCLUDED.fused,
             panel_size = EXCLUDED.panel_size,
             judge_used = EXCLUDED.judge_used,
-            strategy = EXCLUDED.strategy
+            strategy = EXCLUDED.strategy,
+            client_agent = COALESCE(EXCLUDED.client_agent, requests.client_agent),
+            client_ip = COALESCE(EXCLUDED.client_ip, requests.client_ip),
+            client_user_agent = COALESCE(EXCLUDED.client_user_agent, requests.client_user_agent),
+            request_type = COALESCE(EXCLUDED.request_type, requests.request_type),
+            requested_model = COALESCE(EXCLUDED.requested_model, requests.requested_model)
         `;
       }
       
@@ -494,6 +558,12 @@ interface RequestLogData {
   panel_size?: number;
   judge_used?: boolean;
   strategy?: string;
+  client_agent?: string;
+  client_ip?: string;
+  client_user_agent?: string;
+  request_type?: string;
+  /** Model the client asked for ('auto'/'fusion' mean "not pinned"). */
+  requested_model?: string | null;
   phase: "request" | "response";
 }
 
