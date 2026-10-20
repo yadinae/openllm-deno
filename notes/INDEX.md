@@ -1,4 +1,7 @@
 # 笔记索引
+| 2026-10-20 | 【对比】免费判定：原版靠准入(签名目录+字面'free')，models 表无 free 列；移植版三套判据并存、用「无价格即免费」致满屏假阳性 | 架构/调研 | [_cmp-free-detect.md](_cmp-free-detect.md) |
+| 2026-10-20 | 【对比】auto 调度：原版是签名目录+预排序链路+多轴bandit三层子系统，移植版只是每请求现捞现算 | 架构/调研 | [_cmp-auto-routing.md](_cmp-auto-routing.md) |
+| 2026-10-20 | 【对比总表】FreeLLMAPI↔OpenLLM 功能差距：缺 36 个 services 模块，端点面大体已对齐、差在调度深度 | 架构/调研 | [_cmp-gap-matrix.md](_cmp-gap-matrix.md) |
 | 2026-10-20 | auto 不是筛选免费模型而是抓上游列表头 8 个 + 错误形状导致未知错误 | 踩坑/修复 | [2026-10-20-auto-routing-free-models.md](2026-10-20-auto-routing-free-models.md) |
 | 2026-10-20 | 智能体页 i.filter is not a function + 试验场 未知错误 + 登录重置 | 踩坑/修复 | [2026-10-20-agents-playground-fixes.md](2026-10-20-agents-playground-fixes.md) |
 | 2026-10-20 | 智能体页 i.filter is not a function：analytics 端点返回包裹对象崩 SPA .filter | 踩坑/修复 | [2026-10-20-agents-page-analytics-envelope-crash.md](2026-10-20-agents-page-analytics-envelope-crash.md) |

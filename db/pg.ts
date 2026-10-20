@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS models (
   context_window       INTEGER,
   enabled              INTEGER NOT NULL DEFAULT 1,
   supports_vision      INTEGER NOT NULL DEFAULT 0,
+  in_catalog          INTEGER NOT NULL DEFAULT 0,
   UNIQUE (platform, model_id)
 );
 
@@ -587,6 +588,10 @@ const MIGRATIONS: string[] = [
   "ALTER TABLE models ADD COLUMN IF NOT EXISTS paid_output_per_m REAL",
   "ALTER TABLE models ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'catalog'",
   "ALTER TABLE models ADD COLUMN IF NOT EXISTS endpoint_scope TEXT NOT NULL DEFAULT ''",
+  // models: in_catalog flag from the upstream signed catalog. Rows NOT in the
+  // catalog have no free-tier evidence and must never be auto-routed.
+  "ALTER TABLE models ADD COLUMN IF NOT EXISTS in_catalog INTEGER NOT NULL DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_models_in_catalog ON models(in_catalog)",
   "ALTER TABLE media_models ADD COLUMN IF NOT EXISTS meta_json TEXT",
   // api_keys deployed before `id` existed in the DDL — router.ts resolves panel
   // members by key id and 503s ("No available providers") without it.

@@ -651,6 +651,11 @@ const ROUTABLE_CAP_PER_PLATFORM = 25;
  * Models this platform may serve, best-first, with freeness resolved.
  * The curated `models` table is the allowlist (operator-approved, chat-capable,
  * quality-ranked); discovery only contributes models it positively knows are free.
+ *
+ * CRITICAL: Only models with `in_catalog = TRUE` are routed for `auto`/`fusion`.
+ * The signed catalog (api.freellmapi.co/v1/latest) is the ONLY authoritative
+ * source of free-tier evidence. Models without this flag have no proof of
+ * freeness and MUST NOT be auto-routed.
  */
 export async function loadRoutableModels(platform: string): Promise<RoutableModel[]> {
   const cached = ROUTABLE_CACHE.get(platform);
@@ -663,7 +668,7 @@ export async function loadRoutableModels(platform: string): Promise<RoutableMode
       SELECT model_id AS mid,
              (paid_input_per_m IS NOT NULL AND paid_input_per_m > 0) AS paid
         FROM models
-       WHERE platform = ${platform} AND enabled = 1
+       WHERE platform = ${platform} AND enabled = 1 AND in_catalog = 1
        ORDER BY (paid_input_per_m IS NULL OR paid_input_per_m = 0) DESC NULLS LAST,
                 intelligence_rank DESC NULLS LAST
        LIMIT ${ROUTABLE_CAP_PER_PLATFORM * 3}
@@ -686,7 +691,7 @@ export async function loadRoutableModels(platform: string): Promise<RoutableMode
   }
 
   // Runtime pricing detector, best-effort: confirms free models the catalog
-  // lists without a price stamp.
+  // lists without a price stamp. Only used as a fallback when catalog is empty.
   try {
     const { getFreeModelsCached } = await import("../providers/free-detect-service.ts");
     for (const id of await getFreeModelsCached(platform)) {

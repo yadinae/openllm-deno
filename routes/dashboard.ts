@@ -396,3 +396,35 @@ dashboardRouter.delete("/fallback/penalty-inspector", (c) => c.json({ ok: true }
 dashboardRouter.delete("/client-profiles/:id", (c) => c.json({ ok: true }));
 dashboardRouter.delete("/keys/:id/cooldowns", (c) => c.json({ ok: true }));
 dashboardRouter.delete("/models/:id", (c) => c.json({ ok: true }));
+
+// ── Catalog Sync (manual trigger for admin dashboard) ─────────────────────────
+dashboardRouter.post("/catalog/sync", async (c) => {
+  try {
+    const { syncSignedCatalog } = await import("../services/catalog-sync.ts");
+    const r = await syncSignedCatalog();
+    return c.json(r);
+  } catch (e) {
+    return c.json(
+      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      500
+    );
+  }
+});
+
+dashboardRouter.get("/catalog/sync/status", async (c) => {
+  try {
+    const { getSetting } = await import("../db/pg.ts");
+    const [version, syncedAt, err] = await Promise.all([
+      getSetting("catalog_version"),
+      getSetting("catalog_synced_at"),
+      getSetting("catalog_sync_error"),
+    ]);
+    return c.json({
+      version: version ?? null,
+      syncedAt: syncedAt ?? null,
+      lastError: err ?? null,
+    });
+  } catch (e) {
+    return c.json({ version: null, syncedAt: null, lastError: e instanceof Error ? e.message : String(e) });
+  }
+});

@@ -305,6 +305,38 @@ try {
 // Track startup time for uptime metric
 (globalThis as any).openllmStartTime = Date.now();
 
+// ── Catalog Sync Cron (daily at 04:30 UTC) ───────────────────────────────────
+// Pulls the signed catalog from api.freellmapi.co/v1/latest and upserts into
+// the models table, setting in_catalog=TRUE. Rows absent from the feed are
+// retired (in_catalog=FALSE) so auto-routing only uses models with free-tier
+// evidence.
+try {
+  import("./services/catalog-sync.ts").then(({ syncSignedCatalog }) => {
+    // Run once at boot (fire-and-forget) to prime the catalog quickly.
+    // Guard with a short delay so the DB is ready.
+    setTimeout(() => {
+      syncSignedCatalog().then((r) =>
+        r.ok
+          ? console.log(`[catalog-sync] boot sync ok: v${r.version} upserted=${r.upserted} retired=${r.retired}`)
+          : console.error(`[catalog-sync] boot sync failed: ${r.error}`)
+      );
+    }, 15_000);
+
+    // Then schedule daily at 04:30 UTC (after daily quota resets for most providers).
+    Deno.cron("catalog-sync", "30 4 * * *", async () => {
+      const r = await syncSignedCatalog();
+      if (r.ok) {
+        console.log(`[catalog-sync] ${r.version} upserted=${r.upserted} retired=${r.retired}`);
+      } else {
+        console.error(`[catalog-sync] failed: ${r.error}`);
+      }
+    });
+    console.log("[openllm] catalog-sync cron scheduled (daily 04:30 UTC + boot kick)");
+  });
+} catch {
+  console.log("[openllm] catalog-sync unavailable (local run or import error) — skipping");
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 
 const port = Number(Deno.env.get("PORT") || "9999");
