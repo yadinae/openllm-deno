@@ -21,6 +21,7 @@ import type {
   RequestOptions,
 } from "./types.ts";
 import { detectFreeModel } from "./free-detect.ts";
+import { recordUpstreamQuota } from "./quota-observation.ts";
 
 // ============================================================================
 // Gemini API Types
@@ -133,6 +134,7 @@ export class GeminiAdapter implements ProviderAdapter {
       });
 
       const latency_ms = Date.now() - startTime;
+      recordUpstreamQuota(key, this.id, req.model, res.status, res.headers, { endpoint: "/v1beta/models/:generateContent", origin: "proxy" });
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -237,6 +239,38 @@ export class GeminiAdapter implements ProviderAdapter {
         latency_ms: Date.now() - startTime,
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+  }
+
+  /** Validate an API key — minimal generateContent call */
+  async validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean> {
+    const modelId = this.capabilities.default_model ?? "gemini-1.5-flash";
+    const url = `${this.base_url}/v1beta/models/${modelId}:generateContent`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": decryptedKey,
+        },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "test" }] }],
+          generationConfig: { maxOutputTokens: 5 },
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (res.ok) return { valid: true };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, status: res.status, error: "Invalid API key" };
+      }
+      return { valid: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

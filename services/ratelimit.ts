@@ -332,14 +332,21 @@ export class CooldownManager {
           return;
         }
         await initDb();
+        // Determine provenance: "authoritative" when provider gave explicit
+        // retry-after/reset time; "heuristic" when we inferred from status code.
+        const provenance = reason.startsWith("provider_") ? "authoritative" : "heuristic";
+        const nowMs = Date.now();
         await query`
-          INSERT INTO rate_limit_cooldowns (platform, model_id, key_id, expires_at_ms, created_at)
-          VALUES (${platform}, ${modelId}, ${keyId}, ${expiresAtMs}, ${new Date().toISOString()})
+          INSERT INTO rate_limit_cooldowns (platform, model_id, key_id, expires_at_ms, created_at, set_at_ms, provenance)
+          VALUES (${platform}, ${modelId}, ${keyId}, ${expiresAtMs}, ${new Date().toISOString()}, ${nowMs}, ${provenance})
           ON CONFLICT (platform, model_id, key_id) DO UPDATE SET
             expires_at_ms = GREATEST(rate_limit_cooldowns.expires_at_ms, ${expiresAtMs}),
-            created_at = ${new Date().toISOString()}
+            created_at = ${new Date().toISOString()},
+            -- Preserve original set_at_ms/provenance on conflict (first set wins)
+            set_at_ms = COALESCE(rate_limit_cooldowns.set_at_ms, ${nowMs}),
+            provenance = COALESCE(rate_limit_cooldowns.provenance, ${provenance})
         `;
-        console.log(`[cooldown] Set for ${platform}/${modelId}/${keyId} until ${new Date(expiresAtMs).toISOString()} (${reason})`);
+        console.log(`[cooldown] Set for ${platform}/${modelId}/${keyId} until ${new Date(expiresAtMs).toISOString()} (${reason}, ${provenance})`);
       } catch (e) {
         console.error("[cooldown] setCooldown error:", e);
       }
@@ -401,6 +408,121 @@ export class CooldownManager {
       `;
     } catch (e) {
       console.error("[cooldown] clearCooldown error:", e);
+    }
+  }
+
+  /**
+   * Get cooldowns that are ripe for probing.
+   * - Only heuristic cooldowns (authoritative ones have provider-stated retry time)
+   * - Must have served at least MIN_ELAPSED_FRACTION of their bench time
+   * - Must have at least MIN_REMAINING_MS left (not worth probing if expiring soon)
+   * - Exponential backoff: don't probe if last probe was too recent
+   */
+  static async getProbeableCooldowns(): Promise<Array<{
+    platform: string;
+    model_id: string;
+    key_id: number;
+    expires_at_ms: number;
+    set_at_ms: number | null;
+    last_probed_at_ms: number | null;
+    probe_count: number;
+  }>> {
+    const MIN_ELAPSED_FRACTION = 0.5;
+    const MIN_REMAINING_MS = 60_000;
+    const PROBE_BACKOFF_BASE_MS = 2 * 60 * 1000;
+    const PROBE_BACKOFF_MAX_MS = 15 * 60 * 1000;
+    const FIRST_PROBE_STAGGER_MS = 45 * 1000;
+
+    try {
+      await initDb();
+      const now = Date.now();
+      const rows = await query`
+        SELECT platform, model_id, key_id, expires_at_ms, set_at_ms, provenance, last_probed_at_ms, probe_count
+        FROM rate_limit_cooldowns
+        WHERE expires_at_ms > ${now}
+          AND (provenance = 'heuristic' OR provenance IS NULL)
+      `;
+
+      const probeable = [];
+      for (const r of rows as any[]) {
+        const expiresAt = Number(r.expires_at_ms);
+        const setAt = r.set_at_ms ? Number(r.set_at_ms) : null;
+        const lastProbed = r.last_probed_at_ms ? Number(r.last_probed_at_ms) : null;
+        const probeCount = Number(r.probe_count ?? 0);
+
+        // Not worth probing if expiring soon
+        if (expiresAt - now < MIN_REMAINING_MS) continue;
+
+        // Check if enough time has elapsed since cooldown was set
+        if (setAt !== null) {
+          const duration = expiresAt - setAt;
+          const elapsed = now - setAt;
+          if (elapsed < duration * MIN_ELAPSED_FRACTION) continue;
+        }
+
+        // Exponential backoff: 2m, 4m, 8m, capped at 15m
+        if (lastProbed !== null) {
+          const backoffMs = Math.min(PROBE_BACKOFF_BASE_MS * Math.pow(2, probeCount), PROBE_BACKOFF_MAX_MS);
+          if (now - lastProbed < backoffMs) continue;
+        } else {
+          // First probe: stagger to avoid thundering herd on restart
+          const staggerMs = FIRST_PROBE_STAGGER_MS * Math.random();
+          if (now - (setAt ?? now) < staggerMs) continue;
+        }
+
+        probeable.push({
+          platform: r.platform,
+          model_id: r.model_id,
+          key_id: Number(r.key_id),
+          expires_at_ms: expiresAt,
+          set_at_ms: setAt,
+          last_probed_at_ms: lastProbed,
+          probe_count: probeCount,
+        });
+      }
+
+      return probeable;
+    } catch (e) {
+      console.error("[cooldown] getProbeableCooldowns error:", e);
+      return [];
+    }
+  }
+
+  /**
+   * Clear a cooldown early (when probe succeeds).
+   * Also resets probe tracking for that cooldown.
+   */
+  static async clearCooldownEarly(platform: string, modelId: string, keyId: number): Promise<void> {
+    try {
+      if (!keyId || keyId <= 0 || isNaN(keyId)) {
+        console.warn("[cooldown] Invalid keyId in clearCooldownEarly, skipping:", keyId);
+        return;
+      }
+      await initDb();
+      await query`
+        DELETE FROM rate_limit_cooldowns
+        WHERE platform = ${platform} AND model_id = ${modelId} AND key_id = ${keyId}
+      `;
+      console.log(`[cooldown] Cleared early for ${platform}/${modelId}/${keyId} (probe succeeded)`);
+    } catch (e) {
+      console.error("[cooldown] clearCooldownEarly error:", e);
+    }
+  }
+
+  /**
+   * Record a probe attempt (for backoff tracking).
+   */
+  static async recordProbeAttempt(platform: string, modelId: string, keyId: number): Promise<void> {
+    try {
+      if (!keyId || keyId <= 0 || isNaN(keyId)) return;
+      await initDb();
+      await query`
+        UPDATE rate_limit_cooldowns
+        SET last_probed_at_ms = ${Date.now()}, probe_count = probe_count + 1
+        WHERE platform = ${platform} AND model_id = ${modelId} AND key_id = ${keyId}
+      `;
+    } catch (e) {
+      console.error("[cooldown] recordProbeAttempt error:", e);
     }
   }
 

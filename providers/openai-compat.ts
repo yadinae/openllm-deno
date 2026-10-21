@@ -4,6 +4,7 @@
  */
 
 import { detectFreeModel } from "./free-detect.ts";
+import { recordUpstreamQuota } from "./quota-observation.ts";
 import type {
   ProviderAdapter,
   ProviderConfig,
@@ -77,6 +78,7 @@ export class OpenAICompatAdapter implements ProviderAdapter {
       });
 
       const latency_ms = Date.now() - startTime;
+      recordUpstreamQuota(key, this.id, req.model, res.status, res.headers, { endpoint: "/chat/completions", origin: "proxy" });
 
       if (!res.ok) {
             const text = await res.text().catch(() => "");
@@ -262,6 +264,34 @@ export class OpenAICompatAdapter implements ProviderAdapter {
         latency_ms: Date.now() - startTime,
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+  }
+
+  /** Validate an API key — lightweight GET /models call */
+  async validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean> {
+    const url = `${this.base_url.replace(/\/$/, "")}/models`;
+
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${decryptedKey}`,
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (res.ok) return { valid: true };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, status: res.status, error: "Invalid API key" };
+      }
+      // Other status = transport issue, not key invalidity
+      return { valid: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      // Transport error (DNS, timeout, TLS)
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

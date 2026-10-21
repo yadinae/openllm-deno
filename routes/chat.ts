@@ -159,9 +159,16 @@ chatRouter.post("/chat/completions", async (c) => {
       }
       const res = await executeWithFallback(body, ctx);
       const statusCode = res.error ? (res.status ?? 502) : 200;
+      // Extract strategy label from _routed_via.reason for the request audit
+      // trail. The router embeds `strategy=<preset>` in every routing reason,
+      // so `strategy` in the requests table records what the decision model
+      // (or configured default) chose for this request.
+      const routedVia = (res.response as unknown as Record<string, unknown> | null)?._routed_via as { reason?: string } | undefined;
+      const strategyMatch = routedVia?.reason?.match(/strategy=(\w+)/);
+      const routedStrategy = strategyMatch ? strategyMatch[1] : undefined;
       await requestLogger.logComplete(
         vRequestId, "auto", "auto", 0, undefined, body, res.response ?? null,
-        Date.now() - vStart, statusCode, res.error,
+        Date.now() - vStart, statusCode, res.error, false, undefined, undefined, routedStrategy,
       );
       if (res.error) {
         // Standard error shape: { error: { message, type } }. The SPA reads

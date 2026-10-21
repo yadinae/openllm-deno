@@ -20,6 +20,7 @@ import type {
   RequestOptions,
 } from "./types.ts";
 import { detectFreeModel } from "./free-detect.ts";
+import { recordUpstreamQuota } from "./quota-observation.ts";
 
 // ============================================================================
 // Anthropic Message Types
@@ -114,6 +115,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       });
 
       const latency_ms = Date.now() - startTime;
+      recordUpstreamQuota(key, this.id, req.model, res.status, res.headers, { endpoint: "/messages", origin: "proxy" });
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -218,6 +220,39 @@ export class AnthropicAdapter implements ProviderAdapter {
         latency_ms: Date.now() - startTime,
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+  }
+
+  /** Validate an API key — minimal chat completion (Anthropic has no /models) */
+  async validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean> {
+    const url = `${this.base_url}/messages`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": decryptedKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: this.capabilities.default_model ?? "claude-3-haiku-20240307",
+          max_tokens: 5,
+          messages: [{ role: "user", content: "test" }],
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (res.ok) return { valid: true };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, status: res.status, error: "Invalid API key" };
+      }
+      return { valid: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

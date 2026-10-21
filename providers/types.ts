@@ -162,6 +162,12 @@ export interface ProviderAdapter {
   /** Test provider connectivity and key validity */
   test(key: ApiKey): Promise<TestResult>;
 
+  /** Validate an API key (lightweight check, used by health/cooldown probes) */
+  validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean>;
+
   /** Estimate token count for a request */
   estimate_tokens(req: ChatCompletionRequest): number;
 }

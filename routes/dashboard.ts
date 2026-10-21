@@ -13,6 +13,14 @@
 import { Hono, type Context } from "hono";
 import { getSetting, listApiKeys, saveApiKey, saveModels, saveSetting } from "../db/pg.ts";
 import { encryptKey } from "../db/mod.ts";
+import {
+  SETTING_DECISION_MODEL,
+  SETTING_DECISION_PROVIDER,
+  SETTING_DECISION_CACHE_TTL_MS,
+  SETTING_DECISION_ENABLED,
+  clearDecisionCache,
+  getDecisionCacheStats,
+} from "../services/routing-decision.ts";
 
 export const dashboardRouter = new Hono();
 
@@ -427,4 +435,62 @@ dashboardRouter.get("/catalog/sync/status", async (c) => {
   } catch (e) {
     return c.json({ version: null, syncedAt: null, lastError: e instanceof Error ? e.message : String(e) });
   }
+});
+
+dashboardRouter.get("/settings/routing-strategy", async (c) => {
+  const strategy = await getSetting<string>("routing_strategy");
+  return c.json({ strategy: strategy ?? "balanced" });
+});
+
+dashboardRouter.put("/settings/routing-strategy", async (c) => {
+  const b = await c.req.json().catch(() => ({})) as { strategy?: string };
+  const strategy = b.strategy ?? "balanced";
+  await saveSetting("routing_strategy", strategy);
+  return c.json({ ok: true, strategy });
+});
+
+// ── Routing Decision Model ───────────────────────────────────────────────────
+
+dashboardRouter.get("/settings/routing-decision", async (c) => {
+  const [enabled, provider, model, cacheTtlMs] = await Promise.all([
+    getSetting<boolean>(SETTING_DECISION_ENABLED),
+    getSetting<string>(SETTING_DECISION_PROVIDER),
+    getSetting<string>(SETTING_DECISION_MODEL),
+    getSetting<number>(SETTING_DECISION_CACHE_TTL_MS),
+  ]);
+  return c.json({
+    enabled: enabled ?? false,
+    provider: provider ?? "groq",
+    model: model ?? "openai/gpt-oss-20b",
+    cacheTtlMs: cacheTtlMs ?? 30 * 60 * 1000,
+  });
+});
+
+dashboardRouter.put("/settings/routing-decision", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    enabled?: boolean;
+    provider?: string;
+    model?: string;
+    cacheTtlMs?: number;
+  };
+  const updates: Array<[string, unknown]> = [];
+  if (body.enabled !== undefined) updates.push([SETTING_DECISION_ENABLED, body.enabled]);
+  if (body.provider !== undefined) updates.push([SETTING_DECISION_PROVIDER, body.provider]);
+  if (body.model !== undefined) updates.push([SETTING_DECISION_MODEL, body.model]);
+  if (body.cacheTtlMs !== undefined) updates.push([SETTING_DECISION_CACHE_TTL_MS, body.cacheTtlMs]);
+  await Promise.all(updates.map(([k, v]) => saveSetting(k, v)));
+  // Clear cache when config changes
+  if (body.enabled !== undefined || body.provider !== undefined || body.model !== undefined) {
+    clearDecisionCache();
+  }
+  return c.json({ ok: true, updated: updates.length });
+});
+
+dashboardRouter.get("/settings/routing-decision/cache", (c) => {
+  return c.json(getDecisionCacheStats());
+});
+
+dashboardRouter.delete("/settings/routing-decision/cache", (c) => {
+  clearDecisionCache();
+  return c.json({ ok: true });
 });

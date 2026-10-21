@@ -227,6 +227,31 @@ function safeHostname(): string {
 
 app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString(), hostname: safeHostname(), storage: "Prisma Postgres" }));
 
+// ── Liveness / readiness (Kubernetes-style probes added during P2) ─────────
+// /livez  — process is up and able to serve; no DB round-trip. If this fails,
+//            the runtime should recycle the isolate. Keep it cheap and dumb.
+// /readyz — storage is reachable and minimally populated. This is the probe a
+//            deployer gates traffic on; fail it (503) while warm-up is still
+//            running so the load balancer drains us instead of routing into a
+//            cold isolate that 500s on the first query.
+app.get("/livez", (c) => c.json({ ok: true, ts: new Date().toISOString() }));
+app.get("/readyz", async (c) => {
+  const { pingDb } = await import("./db/pg.ts");
+  const db = await pingDb();
+  return c.json(
+    { ok: db.ok, storage: db.ok ? "Prisma Postgres" : "unavailable", detail: db.detail, ts: new Date().toISOString() },
+    db.ok ? 200 : 503,
+  );
+});
+
+// Provider registry listing — parity with FreeLLMAPI /v1/providers. Exposes
+// only public metadata (id/name/protocol/health/capabilities); never key data.
+import { providerRegistry } from "./providers/index.ts";
+app.get("/v1/providers", (c) => {
+  const providers = providerRegistry.list();
+  return c.json({ object: "list", data: providers });
+});
+
 // ── Static Files (FreeLLMAPI React SPA) ──────────────────────────────────────
 
 const DIST = `${Deno.cwd()}/dist`;
@@ -305,6 +330,17 @@ try {
 // Track startup time for uptime metric
 (globalThis as any).openllmStartTime = Date.now();
 
+// ── Routing Decision Model Settings Initialization ─────────────────────────
+try {
+  import("./services/routing-decision.ts").then(({ initDecisionSettings }) => {
+    initDecisionSettings().catch((e) => console.error("[openllm] initDecisionSettings failed:", e));
+  }).catch(() => {
+    console.log("[openllm] routing-decision module unavailable — skipping init");
+  });
+} catch {
+  console.log("[openllm] routing-decision module unavailable — skipping init");
+}
+
 // ── Catalog Sync Cron (daily at 04:30 UTC) ───────────────────────────────────
 // Pulls the signed catalog from api.freellmapi.co/v1/latest and upserts into
 // the models table, setting in_catalog=TRUE. Rows absent from the feed are
@@ -335,6 +371,21 @@ try {
   });
 } catch {
   console.log("[openllm] catalog-sync unavailable (local run or import error) — skipping");
+}
+
+// ── Cooldown Probe Cron (every minute) ───────────────────────────────────────
+// Probes keys in HEURISTIC cooldowns (not authoritative retry-after) to clear
+// them early when the provider recovers. Runs every minute, probes up to 3 keys
+// per pass with exponential backoff and stagger. Kill switch: COOLDOWN_PROBE_DISABLED=1
+try {
+  import("./services/cooldown-probe.ts").then(({ startCooldownProbe }) => {
+    startCooldownProbe();
+    console.log("[openllm] cooldown-probe cron started (every 1m)");
+  }).catch(() => {
+    console.log("[openllm] cooldown-probe unavailable — skipping");
+  });
+} catch {
+  console.log("[openllm] cooldown-probe unavailable (local run or import error) — skipping");
 }
 
 // ── Start ────────────────────────────────────────────────────────────────────

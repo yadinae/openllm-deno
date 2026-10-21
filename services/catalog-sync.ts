@@ -190,6 +190,23 @@ export async function syncSignedCatalog(): Promise<{
   await saveSetting(CATALOG_SYNCED_AT_KEY, nowIso);
   await saveSetting(CATALOG_SYNC_ERROR_KEY, null);
 
+  // 4) Refresh override baselines + re-apply local overrides.
+  //    Catalog sync rewrites the models row for every feed model; without this
+  //    step the operator's local edits would be silently overwritten (and the
+  //    model_overrides blob would pin stale baselines). Import is dynamic so a
+  //    missing model-state module never breaks the sync itself.
+  try {
+    const { refreshModelOverrideBaselines, applyAllModelOverrides } = await import("../services/model-state.ts");
+    let refreshed = 0;
+    for (const m of feedModels) {
+      try { await refreshModelOverrideBaselines(m.platform, m.modelId); refreshed++; } catch { /* best-effort */ }
+    }
+    const applied = await applyAllModelOverrides();
+    console.log(`[catalog-sync] override baselines refreshed=${refreshed}, re-applied=${applied}`);
+  } catch (e) {
+    console.warn("[catalog-sync] model-state integration skipped:", e instanceof Error ? e.message : String(e));
+  }
+
   console.log(`[catalog-sync] ${version} upserted=${upserted} retired=${retired}`);
   return { ok: true, version, upserted, retired };
 }

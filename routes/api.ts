@@ -3,9 +3,10 @@
  */
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
-import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel, type CatalogModel } from "../db/pg.ts";
+import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel, getCatalogModelById, type CatalogModel } from "../db/pg.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
+import { getQuotaForecast } from "../services/quota-forecast.ts";
 
 const api = new Hono();
 
@@ -325,6 +326,136 @@ api.delete("/models/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ── Model-state: provenance-aware overrides & tombstones (P1) ────────────────
+import {
+  upsertModelOverrides,
+  getModelOverrides,
+  refreshModelOverrideBaselines,
+  applyModelOverrides,
+  applyAllModelOverrides,
+  overriddenFieldNames,
+  modelsWithOverriddenField,
+  isCatalogManagedModel,
+  getCatalogModelTombstone,
+  isCatalogModelTombstoned,
+  recordCatalogModelTombstone,
+  clearCatalogModelTombstone,
+  retireCatalogModelUpstream,
+  reinstateUpstreamRetiredCatalogModel,
+  deleteTombstonedCatalogModels,
+  type OverridePatch,
+} from "../services/model-state.ts";
+
+/** GET /api/models/:id/overrides — local overrides for a model */
+api.get("/models/:id/overrides", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const overrides = await getModelOverrides(model.platform, model.modelId);
+  return c.json({ overrides, fields: overriddenFieldNames(JSON.stringify(overrides)) });
+});
+
+/** POST /api/models/:id/overrides — upsert local overrides for a model */
+api.post("/models/:id/overrides", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const patch = await c.req.json().catch(() => ({})) as OverridePatch;
+  const merged = await upsertModelOverrides(model.platform, model.modelId, patch, { baselineRow: model as unknown as Record<string, unknown> });
+  return c.json({ overrides: merged });
+});
+
+/** DELETE /api/models/:id/overrides — drop all local overrides for a model */
+api.delete("/models/:id/overrides", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  await upsertModelOverrides(model.platform, model.modelId, {});
+  return c.json({ ok: true });
+});
+
+/** GET /api/models/overrides/:field — which models pin a given field */
+api.get("/models/overrides/:field", async (c) => {
+  const field = c.req.param("field");
+  const pinned = await modelsWithOverriddenField(field);
+  return c.json({ field, pinned: [...pinned] });
+});
+
+/** POST /api/models/overrides/apply — re-apply stored overrides onto rows */
+api.post("/models/overrides/apply", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { platform?: string; modelId?: string };
+  if (body.platform && body.modelId) {
+    const applied = await applyModelOverrides(body.platform, body.modelId);
+    return c.json({ ok: true, applied });
+  }
+  const applied = await applyAllModelOverrides();
+  return c.json({ ok: true, applied });
+});
+
+/** GET /api/models/:id/tombstone — provenance of a deleted model */
+api.get("/models/:id/tombstone", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const tombstone = await getCatalogModelTombstone("chat", model.platform, model.modelId);
+  return c.json({ tombstone: tombstone ?? null });
+});
+
+/** POST /api/models/:id/tombstone — record a tombstone (soft delete marker) */
+api.post("/models/:id/tombstone", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const body = await c.req.json().catch(() => ({})) as { source?: "upstream_eol" | "user"; reason?: string | null };
+  await recordCatalogModelTombstone("chat", model.platform, model.modelId, {
+    source: body.source ?? "user",
+    reason: body.reason ?? null,
+  });
+  return c.json({ ok: true, source: body.source ?? "user" });
+});
+
+/** DELETE /api/models/:id/tombstone — clear a tombstone (reinstate) */
+api.delete("/models/:id/tombstone", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  await clearCatalogModelTombstone("chat", model.platform, model.modelId);
+  return c.json({ ok: true });
+});
+
+/** POST /api/models/:id/retire-upstream — auto-disable a model the provider retired */
+api.post("/models/:id/retire-upstream", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const body = await c.req.json().catch(() => ({})) as { reason?: string };
+  const ok = await retireCatalogModelUpstream(id, model.platform, model.modelId, body.reason ?? "upstream retired");
+  return c.json({ ok, retired: ok });
+});
+
+/** POST /api/models/:id/reinstate — lift an upstream retirement */
+api.post("/models/:id/reinstate", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return err(c, 400, "invalid model id");
+  const model = await getCatalogModelById(id);
+  if (!model) return err(c, 404, "model not found");
+  const ok = await reinstateUpstreamRetiredCatalogModel(model.platform, model.modelId);
+  return c.json({ ok, reinstated: ok });
+});
+
+/** POST /api/models/tombstones/cleanup — delete rows carrying USER tombstones */
+api.post("/models/tombstones/cleanup", async (c) => {
+  const deleted = await deleteTombstonedCatalogModels();
+  return c.json({ ok: true, deleted });
+});
+
 api.post("/models", async (c) => {
   const body = await c.req.json() as { platform?: string; models?: Array<Record<string, unknown>> };
   const raw = Array.isArray(body.models) ? body.models : [];
@@ -447,7 +578,8 @@ api.get("/fallback/token-usage", async (c) => {
 });
 
 api.get("/fallback/quota-forecast", async (c) => {
-  return c.json({ forecast: [], generatedAt: new Date().toISOString() });
+  const forecast = await getQuotaForecast();
+  return c.json({ forecast, generatedAt: new Date().toISOString() });
 });
 
 api.post("/guardrails/usage-cap", async (c) => {

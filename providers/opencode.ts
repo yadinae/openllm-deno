@@ -27,6 +27,7 @@ import type {
   RequestOptions,
 } from "./types.ts";
 import { detectFreeModel } from "./free-detect.ts";
+import { recordUpstreamQuota } from "./quota-observation.ts";
 
 /** OpenCode Zen free models (from FreeLLMAPI migrateModelsV18 + current docs) */
 export const OPencode_FREE_MODELS = [
@@ -184,6 +185,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       });
 
       const latency_ms = Date.now() - startTime;
+      recordUpstreamQuota(key, this.id, req.model, res.status, res.headers, { endpoint: "/chat/completions", origin: "proxy" });
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -312,6 +314,43 @@ export class OpencodeAdapter implements ProviderAdapter {
         latency_ms: Date.now() - startTime,
         error: err instanceof Error ? err.message : String(err),
       };
+    }
+  }
+
+  /** Validate an API key — minimal chat completion (uses free model) */
+  async validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean> {
+    const url = `${this.base_url.replace(/\/$/, "")}/chat/completions`;
+    const authHeader = this.isAnonymous || !decryptedKey
+      ? "Bearer public"
+      : `Bearer ${decryptedKey}`;
+
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+          ...OPENCODE_CLIENT_HEADERS,
+          "x-opencode-session": generateOpencodeSessionId(),
+        },
+        body: JSON.stringify({
+          model: "big-pickle",
+          messages: [{ role: "user", content: "test" }],
+          max_tokens: 5,
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (res.ok) return { valid: true };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, status: res.status, error: "Invalid API key" };
+      }
+      return { valid: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 

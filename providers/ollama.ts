@@ -7,6 +7,7 @@ import type {
   ProviderAdapter, ProviderConfig, ChatCompletionRequest, ChatCompletionResponse,
   ChatCompletionChunk, ModelInfo, ProviderResult, ApiKey, ProviderCapabilities, PricingModel
 } from "./types.ts";
+import { recordUpstreamQuota } from "./quota-observation.ts";
 
 export class OllamaAdapter implements ProviderAdapter {
   readonly id = "ollama";
@@ -56,6 +57,7 @@ export class OllamaAdapter implements ProviderAdapter {
       });
 
       const latency_ms = Date.now() - startTime;
+      recordUpstreamQuota(key, this.id, request.model, res.status, res.headers, { endpoint: "/api/chat", origin: "proxy" });
 
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -214,6 +216,32 @@ export class OllamaAdapter implements ProviderAdapter {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: msg };
+    }
+  }
+
+  /** Validate an API key — /api/tags (no auth typically, but tests connectivity) */
+  async validateKey(
+    decryptedKey: string,
+    options?: { platform?: string; keyId?: number; endpoint?: string; origin?: string }
+  ): Promise<{ valid: boolean; error?: string; status?: number } | boolean> {
+    // Ollama typically doesn't require auth, but we can test connectivity
+    try {
+      const res = await fetch(`${this.base_url}/api/tags`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(decryptedKey ? { Authorization: `Bearer ${decryptedKey}` } : {}),
+        },
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      if (res.ok) return { valid: true };
+      if (res.status === 401 || res.status === 403) {
+        return { valid: false, status: res.status, error: "Invalid API key" };
+      }
+      return { valid: false, status: res.status, error: `HTTP ${res.status}` };
+    } catch (err) {
+      return { valid: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 }

@@ -568,6 +568,14 @@ const MIGRATIONS: string[] = [
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS request_id TEXT NOT NULL DEFAULT 'unknown'",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS key_id INTEGER",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS client_id TEXT",
+  // Cooldown probe columns (P1)
+  "ALTER TABLE rate_limit_cooldowns ADD COLUMN IF NOT EXISTS set_at_ms BIGINT",
+  "ALTER TABLE rate_limit_cooldowns ADD COLUMN IF NOT EXISTS provenance TEXT",
+  "ALTER TABLE rate_limit_cooldowns ADD COLUMN IF NOT EXISTS last_probed_at_ms BIGINT",
+  "ALTER TABLE rate_limit_cooldowns ADD COLUMN IF NOT EXISTS probe_count INTEGER NOT NULL DEFAULT 0",
+  // Model-state: tombstone provenance + reason (P1 model-state port)
+  "ALTER TABLE catalog_model_tombstones ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'user'",
+  "ALTER TABLE catalog_model_tombstones ADD COLUMN IF NOT EXISTS reason TEXT",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS input_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS output_tokens INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE requests ADD COLUMN IF NOT EXISTS total_tokens INTEGER NOT NULL DEFAULT 0",

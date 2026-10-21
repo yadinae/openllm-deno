@@ -83,6 +83,8 @@ import {
   SETTING_COMMUNITY_PRIOR_MAX_SAMPLES,
 } from "./scoring.ts";
 import { getKeyQuotaHeadroom } from "./provider-quota.ts";
+import { reserveMonthlyBudget, settleMonthlyUsage } from "./key-budget.ts";
+import { getRoutingStrategyForRequest, initDecisionSettings } from "./routing-decision.ts";
 
 /** Cached metrics for scoring (refreshed periodically) */
 interface CachedMetrics {
@@ -129,10 +131,35 @@ export class SmartRouter {
 
   /**
    * Get current routing strategy from settings (default: 'balanced').
+   * This returns the configured strategy; for 'decision' it returns 'decision'.
+   * Use resolveStrategyForRequest() to get the actual preset for a request.
    */
   private async getRoutingStrategy(): Promise<RoutingStrategy> {
     const strat = await getSetting<string>(SETTING_ROUTING_STRATEGY);
     return (strat as RoutingStrategy) ?? DEFAULT_STRATEGY;
+  }
+
+  /**
+   * Resolve the routing strategy for a specific request.
+   * For 'decision' strategy, calls the decision model to pick a preset.
+   * Caches the decision for 30 minutes.
+   */
+  private async resolveStrategyForRequest(
+    ctx: RoutingContext,
+  ): Promise<{ strategy: PresetStrategy; reasoning?: string }> {
+    const configured = await this.getRoutingStrategy();
+    if (configured !== "decision") {
+      const validPresets: PresetStrategy[] = ["balanced", "smartest", "fastest", "reliable"];
+      if (validPresets.includes(configured as PresetStrategy)) {
+        return { strategy: configured as PresetStrategy };
+      }
+      return { strategy: "balanced", reasoning: `Invalid strategy '${configured}', using balanced` };
+    }
+
+    // Use decision model to select preset
+    const result = await getRoutingStrategyForRequest(ctx.request, "decision");
+    console.log(`[router] decision-model selected strategy=${result.strategy} source=${result.source}${result.reasoning ? ` (${result.reasoning})` : ""}`);
+    return { strategy: result.strategy, reasoning: result.reasoning };
   }
 
   /**
@@ -208,6 +235,10 @@ export class SmartRouter {
    * scores them using the 3-axis bandit, and returns primary + fallback chain.
    */
   async route(ctx: RoutingContext): Promise<RoutingDecision> {
+    // 0. Resolve routing strategy for this request (handles 'decision' strategy)
+    const { strategy: resolvedStrategy, reasoning: resolvedStrategyReasoning } =
+      await this.resolveStrategyForRequest(ctx);
+
     // 1. Collect all valid candidates
     const candidates = await this.collectCandidates(ctx);
     if (candidates.length === 0) {
@@ -218,7 +249,7 @@ export class SmartRouter {
     const scored = await Promise.all(
       candidates.map(async (c) => ({
         ...c,
-        score: await this.calculateScore(c, ctx),
+        score: await this.calculateScore(c, ctx, resolvedStrategy),
       }))
     );
 
@@ -264,6 +295,11 @@ export class SmartRouter {
     const fallbackChain = chainCandidates.map(this.toFallbackEntry);
     console.log(`[router] candidates=${candidates.length} scored=${scored.length} keys=${new Set(scored.map((s2) => s2.key.id)).size} chain=${fallbackChain.length}`);
 
+    // Build metadata including resolved strategy for audit
+    const strategyInfo = resolvedStrategy
+      ? ` strategy=${resolvedStrategy}${resolvedStrategyReasoning ? ` (${resolvedStrategyReasoning})` : ""}`
+      : "";
+
     return {
       provider: primary.provider,
       model: primary.model,
@@ -271,7 +307,7 @@ export class SmartRouter {
       fallback_chain: fallbackChain,
       metadata: {
         score: primary.score,
-        reason: `bandit-top1 ${primary.free ? "FREE" : "paid"} (latency:${primary.metrics.latency_p50}ms cost:$${primary.metrics.cost_per_1k}/1k quality:${primary.metrics.quality_score} reliability:${primary.metrics.success_rate})`,
+        reason: `bandit-top1 ${primary.free ? "FREE" : "paid"}${strategyInfo} (latency:${primary.metrics.latency_p50}ms cost:$${primary.metrics.cost_per_1k}/1k quality:${primary.metrics.quality_score} reliability:${primary.metrics.success_rate})`,
       },
     };
   }
@@ -399,11 +435,16 @@ export class SmartRouter {
      * Bandit Scoring — the single source of truth for routing scores.
      * Returns a convex combination in [0,1] multiplied by guardrail factors.
      */
-    private async calculateScore(candidate: Candidate, ctx: RoutingContext): Promise<number> {
+   private async calculateScore(
+      candidate: Candidate,
+      ctx: RoutingContext,
+      resolvedStrategy?: PresetStrategy,
+    ): Promise<number> {
       const m = candidate.metrics;
 
-      // 1) Base weights from strategy (with peak-hours + task-type adjustments)
-      const strategy = await this.getRoutingStrategy();
+      // 1) Base weights from resolved strategy (with peak-hours + task-type adjustments)
+      // Use the per-request resolved strategy (handles 'decision' strategy via external LLM)
+      const strategy = resolvedStrategy ?? await this.getRoutingStrategy();
       const customWeights = strategy === "custom" ? await this.getCustomWeights() : null;
       let baseWeights = customWeights ?? BANDIT_PRESETS[strategy as PresetStrategy] ?? BANDIT_PRESETS.balanced;
 
@@ -442,9 +483,12 @@ export class SmartRouter {
       // 3) Speed: throughput + TTFB blended
       const speed = speedScore(candidate.metrics.weighted_tok_per_sec, candidate.metrics.weighted_ttfb_ms);
 
-      // 4) Intelligence: we'll use a placeholder; actual composite is computed in computeMetrics
-      // and normalized across the chain in route()
-      const intelligence = candidate.metrics.quality_score;
+      // 4) Intelligence: the composite (size × tier) is computed in computeMetrics
+      // and min-max normalized across the chain in route(). Use the normalized
+      // value when available (route() runs first and sets _normIntelligence on
+      // every candidate); fall back to the raw quality_score for single-candidate
+      // paths where normalization is a no-op.
+      const intelligence = (candidate as any)._normIntelligence ?? candidate.metrics.quality_score;
 
       // 5) Guardrails
       const headroomOpts = await this.getHeadroomThresholds();
@@ -820,6 +864,27 @@ export async function executeWithFallback(
   const decision = await smartRouter.route(ctx);
   const tried = new Set<string>();
 
+  // Per-key monthly budget admission gate (#1158 parity). Reserve estimated
+  // tokens before dispatch and release on every terminal path. A key at its
+  // cap gets a 429 with seconds-until-next-month so the caller knows when the
+  // window resets instead of hammering a bare 429.
+  const estimatedTokens = decision.provider.estimate_tokens(request);
+  const budget = await reserveMonthlyBudget(decision.key.db_id, estimatedTokens);
+  const releaseBudget = () => budget.release?.();
+  if (!budget.allowed) {
+    return {
+      error: `monthly_${budget.reason}`,
+      status: 429,
+      latency_ms: 0,
+      provider_metadata: {
+        retry_after_sec: budget.retryAfterSec,
+        reason: budget.reason,
+        exhausted_chain: false,
+        attempts: [],
+      },
+    };
+  }
+
   // Try primary — the router chose decision.model, so the caller's virtual
   // model name ("auto") must not leak to the provider.
   const primaryKey = `${decision.provider.id}/${decision.model}/${decision.key.id}`;
@@ -842,6 +907,12 @@ export async function executeWithFallback(
         reason: decision.metadata.reason,
       };
     }
+    releaseBudget();
+    await settleMonthlyUsage(
+      decision.key.db_id,
+      primaryResult.response?.usage?.prompt_tokens ?? estimatedTokens,
+      primaryResult.response?.usage?.completion_tokens ?? 0,
+    );
     return primaryResult;
   }
 
@@ -876,8 +947,17 @@ export async function executeWithFallback(
           model: fallback.model,
           fallback: true,
           primary_error: primaryString(primaryResult.error),
+          // Preserve the routing-decision strategy so the audit trail records
+          // what the decision model selected, even when the primary failed.
+          reason: decision.metadata.reason,
         };
       }
+      releaseBudget();
+      await settleMonthlyUsage(
+        fallbackKeyObj.db_id,
+        result.response?.usage?.prompt_tokens ?? estimatedTokens,
+        result.response?.usage?.completion_tokens ?? 0,
+      );
       return result;
     }
   }
@@ -897,7 +977,27 @@ export async function executeWithFallback(
       attempts: [...tried],
     },
   };
+  releaseBudget();
   return failedResult;
+}
+
+/**
+ * P2 summarizeExhaustion helper: build a human-readable summary of WHY the
+ * fallback chain died, with a suggested next-try hint when a rate-limit reset
+ * time is known. Used by routes to enrich the error body the SPA renders.
+ */
+export function summarizeExhaustion(result: ProviderResult): {
+  message: string;
+  attempts: string[];
+  retryAfterSec?: number;
+} | null {
+  const meta = result.provider_metadata as Record<string, unknown> | undefined;
+  if (!meta?.exhausted_chain) return null;
+  const attempts = Array.isArray(meta.attempts) ? (meta.attempts as string[]) : [];
+  const msg = typeof result.error === "string" ? result.error : "All providers failed";
+  const retryAfterSec = typeof meta.retry_after_sec === "number" ? meta.retry_after_sec : undefined;
+  const summary = `${msg} (after ${attempts.length} attempt${attempts.length === 1 ? "" : "s"})`;
+  return { message: summary, attempts, retryAfterSec };
 }
 
 function primaryString(err: unknown): string {
