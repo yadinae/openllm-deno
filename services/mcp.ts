@@ -187,6 +187,16 @@ export class MCPServer {
   private toolHandlers: Map<string, (args: any) => Promise<MCPCallToolResult>> = new Map();
   private resourceHandlers: Map<string, (uri: string) => Promise<MCPReadResourceResult>> = new Map();
 
+  // Gateway context (set via initGatewayContext)
+  private chatHandler?: (args: any) => Promise<MCPCallToolResult>;
+  private modelsHandler?: (args: any) => Promise<MCPCallToolResult>;
+  private embeddingsHandler?: (args: any) => Promise<MCPCallToolResult>;
+  private searchHandler?: (args: any) => Promise<MCPCallToolResult>;
+  private mediaHandler?: (args: any) => Promise<MCPCallToolResult>;
+  private modelsResourceHandler?: () => Promise<MCPReadResourceResult>;
+  private providersResourceHandler?: () => Promise<MCPReadResourceResult>;
+  private healthResourceHandler?: () => Promise<MCPReadResourceResult>;
+
   constructor(private serverInfo = { name: "OpenLLM", version: "1.0.0" }) {
     // Register built-in tools
     for (const tool of BUILTIN_TOOLS) {
@@ -196,6 +206,39 @@ export class MCPServer {
     for (const resource of BUILTIN_RESOURCES) {
       this.resources.set(resource.uri, resource);
     }
+  }
+
+  /** Initialize gateway context handlers (call once from api.ts after services are ready) */
+  initGatewayContext(ctx: {
+    chatHandler: (args: any) => Promise<MCPCallToolResult>;
+    modelsHandler: (args: any) => Promise<MCPCallToolResult>;
+    embeddingsHandler: (args: any) => Promise<MCPCallToolResult>;
+    searchHandler: (args: any) => Promise<MCPCallToolResult>;
+    mediaHandler: (args: any) => Promise<MCPCallToolResult>;
+    modelsResourceHandler: () => Promise<MCPReadResourceResult>;
+    providersResourceHandler: () => Promise<MCPReadResourceResult>;
+    healthResourceHandler: () => Promise<MCPReadResourceResult>;
+  }): void {
+    this.chatHandler = ctx.chatHandler;
+    this.modelsHandler = ctx.modelsHandler;
+    this.embeddingsHandler = ctx.embeddingsHandler;
+    this.searchHandler = ctx.searchHandler;
+    this.mediaHandler = ctx.mediaHandler;
+    this.modelsResourceHandler = ctx.modelsResourceHandler;
+    this.providersResourceHandler = ctx.providersResourceHandler;
+    this.healthResourceHandler = ctx.healthResourceHandler;
+
+    // Register built-in tool handlers
+    if (ctx.chatHandler) this.toolHandlers.set("openllm.chat", ctx.chatHandler);
+    if (ctx.modelsHandler) this.toolHandlers.set("openllm.models", ctx.modelsHandler);
+    if (ctx.embeddingsHandler) this.toolHandlers.set("openllm.embeddings", ctx.embeddingsHandler);
+    if (ctx.searchHandler) this.toolHandlers.set("openllm.search", ctx.searchHandler);
+    if (ctx.mediaHandler) this.toolHandlers.set("openllm.media", ctx.mediaHandler);
+
+    // Register built-in resource handlers
+    if (ctx.modelsResourceHandler) this.resourceHandlers.set("openllm://models", () => ctx.modelsResourceHandler!());
+    if (ctx.providersResourceHandler) this.resourceHandlers.set("openllm://providers", () => ctx.providersResourceHandler!());
+    if (ctx.healthResourceHandler) this.resourceHandlers.set("openllm://health", () => ctx.healthResourceHandler!());
   }
 
   /** Register a custom tool */

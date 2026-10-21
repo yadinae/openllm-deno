@@ -7,6 +7,8 @@ import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting,
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 import { getQuotaForecast } from "../services/quota-forecast.ts";
+import { providerRegistry } from "../providers/index.ts";
+import type { MCPCallToolResult, MCPReadResourceResult } from "../services/mcp.ts";
 
 const api = new Hono();
 
@@ -1107,6 +1109,223 @@ api.post("/search", async (c: any) => {
   if (!key) return c.json({ error: "No API key configured for search engine" }, 400);
   const results = await search(body, { id: key.platform, db_id: key.db_id, platform: key.platform, label: key.label ?? "", encrypted_key: key.encrypted_key ?? "", iv: key.iv ?? "", auth_tag: key.auth_tag ?? "", status: (key.status ?? "healthy") as any, enabled: key.enabled, base_url: key.base_url ?? "" });
   return c.json(results);
+});
+
+// MCP Gateway Context — initialize built-in tool/resource handlers
+// Helper: call chat completion via internal router (reuse providerRegistry)
+async function handleMcpChat(args: any): Promise<MCPCallToolResult> {
+  const { model, messages, max_tokens = 1000, temperature = 0.7 } = args;
+  if (!model || !messages || !Array.isArray(messages)) {
+    return { content: [{ type: "text", text: "model and messages[] are required" }], isError: true };
+  }
+  try {
+    const parts = model.split("/");
+    const platform = parts[0];
+    const modelId = parts.slice(1).join("/");
+    const provider = providerRegistry.get(platform);
+    if (!provider) {
+      return { content: [{ type: "text", text: `Provider not found: ${platform}` }], isError: true };
+    }
+    const keys = await getApiKey(platform);
+    if (!keys) {
+      return { content: [{ type: "text", text: `No API key configured for ${platform}` }], isError: true };
+    }
+    // Cast DbEntry to provider ApiKey (ensure required fields)
+    const apiKey = {
+      id: keys.id,
+      db_id: keys.db_id,
+      platform: keys.platform,
+      label: keys.label ?? keys.platform,
+      encrypted_key: keys.encrypted_key ?? "",
+      iv: keys.iv ?? "",
+      auth_tag: keys.auth_tag ?? "",
+      status: (keys.status ?? "healthy") as any,
+      enabled: keys.enabled,
+      base_url: keys.base_url,
+      monthly_request_cap: keys.monthly_request_cap,
+      monthly_token_cap: keys.monthly_token_cap,
+    } as import("../providers/types.ts").ApiKey;
+    const result = await provider.chat({ model: modelId, messages, max_tokens, temperature }, apiKey);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], isError: false };
+  } catch (e) {
+    return { content: [{ type: "text", text: `Chat error: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+  }
+}
+
+async function handleMcpModels(args: any): Promise<MCPCallToolResult> {
+  const { provider, free_only = false } = args ?? {};
+  try {
+    const models = await listCatalogModels();
+    let filtered = models;
+    if (provider) filtered = filtered.filter(m => m.platform === provider);
+    if (free_only) {
+      // CatalogModel doesn't have quota_label/priority; use rpmLimit as proxy for free tier
+      filtered = filtered.filter(m => (m.rpmLimit !== null && m.rpmLimit < 1000) || (m.tpmLimit !== null && m.tpmLimit < 10000));
+    }
+    return { content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }], isError: false };
+  } catch (e) {
+    return { content: [{ type: "text", text: `Models error: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+  }
+}
+
+async function handleMcpEmbeddings(args: any): Promise<MCPCallToolResult> {
+  const { model, input } = args;
+  if (!model || !input || !Array.isArray(input)) {
+    return { content: [{ type: "text", text: "model and input[] are required" }], isError: true };
+  }
+  try {
+    const parts = model.split("/");
+    const platform = parts[0];
+    const modelId = parts.slice(1).join("/");
+    const provider = providerRegistry.get(platform);
+    if (!provider || typeof (provider as any).embeddings !== "function") {
+      return { content: [{ type: "text", text: `Embeddings not supported for ${platform}` }], isError: true };
+    }
+    const keys = await getApiKey(platform);
+    if (!keys) {
+      return { content: [{ type: "text", text: `No API key configured for ${platform}` }], isError: true };
+    }
+    const apiKey = {
+      id: keys.id,
+      db_id: keys.db_id,
+      platform: keys.platform,
+      label: keys.label ?? keys.platform,
+      encrypted_key: keys.encrypted_key ?? "",
+      iv: keys.iv ?? "",
+      auth_tag: keys.auth_tag ?? "",
+      status: (keys.status ?? "healthy") as any,
+      enabled: keys.enabled,
+      base_url: keys.base_url,
+      monthly_request_cap: keys.monthly_request_cap,
+      monthly_token_cap: keys.monthly_token_cap,
+    } as import("../providers/types.ts").ApiKey;
+    const result = await (provider as any).embeddings({ model: modelId, input }, apiKey);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], isError: false };
+  } catch (e) {
+    return { content: [{ type: "text", text: `Embeddings error: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+  }
+}
+
+async function handleMcpSearch(args: any): Promise<MCPCallToolResult> {
+  const { query, engine = "brave", count = 10 } = args;
+  if (!query || typeof query !== "string") {
+    return { content: [{ type: "text", text: "query is required" }], isError: true };
+  }
+  try {
+    const key = await getApiKey(engine);
+    if (!key) {
+      return { content: [{ type: "text", text: `No API key configured for search engine: ${engine}` }], isError: true };
+    }
+    const searchKey = {
+      id: key.id,
+      db_id: key.db_id,
+      platform: key.platform,
+      label: key.label ?? key.platform,
+      encrypted_key: key.encrypted_key ?? "",
+      iv: key.iv ?? "",
+      auth_tag: key.auth_tag ?? "",
+      status: (key.status ?? "healthy") as any,
+      enabled: key.enabled,
+      base_url: key.base_url,
+      monthly_request_cap: key.monthly_request_cap,
+      monthly_token_cap: key.monthly_token_cap,
+    } as import("../providers/types.ts").ApiKey;
+    const results = await search({ query, engine: engine as any, count }, searchKey);
+    return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }], isError: false };
+  } catch (e) {
+    return { content: [{ type: "text", text: `Search error: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+  }
+}
+
+async function handleMcpMedia(args: any): Promise<MCPCallToolResult> {
+  const { model, prompt, width, height } = args;
+  if (!model || !prompt) {
+    return { content: [{ type: "text", text: "model and prompt are required" }], isError: true };
+  }
+  try {
+    const parts = model.split("/");
+    const platform = parts[0];
+    const modelId = parts.slice(1).join("/");
+    const provider = providerRegistry.get(platform);
+    if (!provider || typeof (provider as any).generateImage !== "function") {
+      return { content: [{ type: "text", text: `Media generation not supported for ${platform}` }], isError: true };
+    }
+    const keys = await getApiKey(platform);
+    if (!keys) {
+      return { content: [{ type: "text", text: `No API key configured for ${platform}` }], isError: true };
+    }
+    const apiKey = {
+      id: keys.id,
+      db_id: keys.db_id,
+      platform: keys.platform,
+      label: keys.label ?? keys.platform,
+      encrypted_key: keys.encrypted_key ?? "",
+      iv: keys.iv ?? "",
+      auth_tag: keys.auth_tag ?? "",
+      status: (keys.status ?? "healthy") as any,
+      enabled: keys.enabled,
+      base_url: keys.base_url,
+      monthly_request_cap: keys.monthly_request_cap,
+      monthly_token_cap: keys.monthly_token_cap,
+    } as import("../providers/types.ts").ApiKey;
+    const result = await (provider as any).generateImage({ model: modelId, prompt, width, height }, apiKey);
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], isError: false };
+  } catch (e) {
+    return { content: [{ type: "text", text: `Media error: ${e instanceof Error ? e.message : String(e)}` }], isError: true };
+  }
+}
+
+async function handleModelsResource(): Promise<MCPReadResourceResult> {
+  try {
+    const models = await listCatalogModels();
+    return { contents: [{ uri: "openllm://models", mimeType: "application/json", text: JSON.stringify(models, null, 2) }] };
+  } catch (e) {
+    return { contents: [{ uri: "openllm://models", mimeType: "application/json", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+  }
+}
+
+async function handleProvidersResource(): Promise<MCPReadResourceResult> {
+  try {
+    const providers = providerRegistry.getAllIds();
+    return { contents: [{ uri: "openllm://providers", mimeType: "application/json", text: JSON.stringify(providers, null, 2) }] };
+  } catch (e) {
+    return { contents: [{ uri: "openllm://providers", mimeType: "application/json", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+  }
+}
+
+async function handleHealthResource(): Promise<MCPReadResourceResult> {
+  try {
+    const keys = await listApiKeys();
+    const platforms = [...new Set(keys.map(k => k.platform))];
+    const health = {
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      platforms: platforms.map(p => ({
+        platform: p,
+        totalKeys: keys.filter(k => k.platform === p).length,
+        enabledKeys: keys.filter(k => k.platform === p && k.enabled).length,
+        healthyKeys: keys.filter(k => k.platform === p && k.enabled && (k.status ?? "healthy") === "healthy").length,
+      })),
+      totalKeys: keys.length,
+      enabledKeys: keys.filter(k => k.enabled).length,
+      totalPlatforms: platforms.length,
+    };
+    return { contents: [{ uri: "openllm://health", mimeType: "application/json", text: JSON.stringify(health, null, 2) }] };
+  } catch (e) {
+    return { contents: [{ uri: "openllm://health", mimeType: "application/json", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+  }
+}
+
+// Initialize MCP server with gateway context
+mcpServer.initGatewayContext({
+  chatHandler: handleMcpChat,
+  modelsHandler: handleMcpModels,
+  embeddingsHandler: handleMcpEmbeddings,
+  searchHandler: handleMcpSearch,
+  mediaHandler: handleMcpMedia,
+  modelsResourceHandler: handleModelsResource,
+  providersResourceHandler: handleProvidersResource,
+  healthResourceHandler: handleHealthResource,
 });
 
 // MCP
