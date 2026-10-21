@@ -15,7 +15,7 @@ import { requestLogger, generateRequestId } from "../services/request-log.ts";
 const geminiRouter = new Hono();
 
 /** List available models — native /v1beta/models endpoint */
-geminiRouter.get("/v1beta/models", async (c) => {
+geminiRouter.get("/models", async (c) => {
   const allKeys = await listApiKeys();
   const models = allKeys
     .filter((k) => k.enabled && k.status === "healthy")
@@ -30,8 +30,8 @@ geminiRouter.get("/v1beta/models", async (c) => {
 });
 
 /** Get single model info — /v1beta/models/{model} */
-geminiRouter.get("/v1beta/models/*", async (c) => {
-  const modelPath = c.req.path.replace("/v1beta/models/", "");
+geminiRouter.get("/models/*", async (c) => {
+  const modelPath = c.req.path.replace("/models/", "");
   const allKeys = await listApiKeys();
   const model = allKeys
     .filter((k) => k.enabled && k.status === "healthy")
@@ -193,7 +193,7 @@ async function handleGenerateContent(c: any, _streamHint: boolean) {
 
   // Extract model and action from path: /v1beta/models/google/gemini-1.5-flash:generateContent
   const path = c.req.path;
-  const match = path.match(/\/v1beta\/models\/([^:]+):(generateContent|streamGenerateContent|countTokens)/);
+  const match = path.match(/\/models\/([^:]+):(generateContent|streamGenerateContent|countTokens)/);
   if (!match) {
     return c.json({ error: { code: 400, message: "Invalid model path" } }, 400);
   }
@@ -316,7 +316,184 @@ async function handleCountTokens(c: any, modelName: string, vRequestId: string, 
   });
 }
 
-// GenerateContent / streamGenerateContent / countTokens (catch-all, parse action in handler)
-geminiRouter.post("/v1beta/models/*", async (c) => handleGenerateContent(c, false));
+/** Parse embedContent request */
+interface GeminiEmbedContentRequest {
+  content: {
+    parts: Array<{ text: string }>;
+  };
+  task_type?: "RETRIEVAL_QUERY" | "RETRIEVAL_DOCUMENT" | "SEMANTIC_SIMILARITY" | "CLASSIFICATION" | "CLUSTERING";
+  title?: string;
+}
+
+/** Handle embedContent — POST /v1beta/models/{model}:embedContent */
+async function handleEmbedContent(c: any) {
+  const vRequestId = generateRequestId();
+  const vStart = Date.now();
+
+  const path = c.req.path;
+  const match = path.match(/\/models\/([^:]+):embedContent/);
+  if (!match) {
+    return c.json({ error: { code: 400, message: "Invalid model path" } }, 400);
+  }
+  const modelName = match[1];
+
+  let body: GeminiEmbedContentRequest;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: { code: 400, message: "Invalid JSON" } }, 400);
+  }
+
+  if (!body.content?.parts?.length) {
+    return c.json({ error: { code: 400, message: "content.parts is required" } }, 400);
+  }
+
+  // Build full model ID (platform/model) — default to google if no platform prefix
+  const modelParts = modelName.split("/");
+  const fullModel = modelParts.length > 1 ? modelName : `google/${modelName}`;
+
+  const parts = fullModel.split("/");
+  const platform = parts[0];
+  const modelId = parts.slice(1).join("/");
+
+  const adapter = getAdapterForPlatform(platform);
+  if (!adapter || typeof (adapter as any).embeddings !== "function") {
+    return c.json({ error: { code: 503, message: `Embeddings not supported for ${platform}` } }, 503);
+  }
+
+  const apiKey = await getApiKeyForPlatform(platform);
+  if (!apiKey) return c.json({ error: { code: 503, message: `No healthy key for ${platform}` } }, 503);
+
+  try {
+    const result = await (adapter as any).embeddings({ model: modelId, input: [body.content.parts[0].text] }, apiKey);
+    const embedding = result.response?.data?.[0]?.embedding ?? [];
+
+    return c.json({
+      embedding: {
+        values: embedding,
+      },
+      metadata: {
+        totalTokenCount: result.response?.usage?.prompt_tokens ?? 0,
+      },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await requestLogger.logComplete(vRequestId, platform, platform, 0, undefined, { model: modelId, messages: [{ role: "user", content: body.content.parts[0].text }] } as any, null, Date.now() - vStart, 503, msg);
+    return c.json({ error: { code: 503, message: msg } }, 503);
+  }
+}
+
+/** Parse generateImage request (maps to providers that support image generation) */
+interface GeminiGenerateImageRequest {
+  prompt: string;
+  model?: string;
+  n?: number;
+  size?: string;
+  quality?: string;
+  style?: string;
+}
+
+/** Handle generateImage — POST /v1beta/models/{model}:generateImage */
+async function handleGenerateImage(c: any) {
+  const vRequestId = generateRequestId();
+  const vStart = Date.now();
+
+  const path = c.req.path;
+  const match = path.match(/\/models\/([^:]+):generateImage/);
+  if (!match) {
+    return c.json({ error: { code: 400, message: "Invalid model path" } }, 400);
+  }
+  const modelName = match[1];
+
+  let body: GeminiGenerateImageRequest;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: { code: 400, message: "Invalid JSON" } }, 400);
+  }
+
+  if (!body.prompt) {
+    return c.json({ error: { code: 400, message: "prompt is required" } }, 400);
+  }
+
+  // Build full model ID (platform/model) — default to google if no platform prefix
+  const modelParts = modelName.split("/");
+  const fullModel = modelParts.length > 1 ? modelName : `google/${modelName}`;
+
+  const parts = fullModel.split("/");
+  const platform = parts[0];
+  const modelId = parts.slice(1).join("/");
+
+  const adapter = getAdapterForPlatform(platform);
+  if (!adapter || typeof (adapter as any).generateImage !== "function") {
+    return c.json({ error: { code: 503, message: `Image generation not supported for ${platform}` } }, 503);
+  }
+
+  const apiKey = await getApiKeyForPlatform(platform);
+  if (!apiKey) return c.json({ error: { code: 503, message: `No healthy key for ${platform}` } }, 503);
+
+  try {
+    const result = await (adapter as any).generateImage({ model: modelId, prompt: body.prompt, n: body.n, size: body.size, quality: body.quality, style: body.style }, apiKey);
+    const images = result.response?.data ?? [];
+
+    return c.json({
+      generatedImages: images.map((img: any, i: number) => ({
+        image: {
+          imageBytes: img.b64_json ? img.b64_json : img.url,
+          mimeType: "image/png",
+        },
+        generationMetadata: {
+          prompt: body.prompt,
+          modelVersion: modelId,
+          seed: i,
+        },
+      })),
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await requestLogger.logComplete(vRequestId, platform, platform, 0, undefined, { model: modelId, messages: [{ role: "user", content: body.prompt }] } as any, null, Date.now() - vStart, 503, msg);
+    return c.json({ error: { code: 503, message: msg } }, 503);
+  }
+}
+
+// Custom route handler for /models/* with colon actions
+// Hono doesn't match colon in path params, so we use a catch-all and dispatch manually
+const GEMINI_ACTIONS = [":generateContent", ":streamGenerateContent", ":countTokens", ":embedContent", ":generateImage"];
+
+function matchGeminiAction(path: string): string | null {
+  for (const action of GEMINI_ACTIONS) {
+    if (path.includes(action)) return action;
+  }
+  return null;
+}
+
+// Custom route handler for /models/* with colon actions — Hono doesn't match colon in path params, so we use a catch-all and dispatch manually
+const GEMINI_ACTIONS = [":generateContent", ":streamGenerateContent", ":countTokens", ":embedContent", ":generateImage"];
+
+function matchGeminiAction(path: string): string | null {
+  for (const action of GEMINI_ACTIONS) {
+    if (path.includes(action)) return action;
+  }
+  return null;
+}
+
+// Handle /models/* with colon actions — Hono's /models/** only matches paths
+// with at least one path segment after /models. Register explicit routes to
+// ensure /models/foo also reaches the handler (so we can return 400 "Invalid model path"
+// instead of the SPA 404).
+geminiRouter.post("/models/*", async (c) => {
+  const path = c.req.path;
+  const action = matchGeminiAction(path);
+  if (action === ":embedContent") return handleEmbedContent(c);
+  if (action === ":generateImage") return handleGenerateImage(c);
+  return handleGenerateContent(c, false);
+});
+geminiRouter.post("/models/**", async (c) => {
+  const path = c.req.path;
+  const action = matchGeminiAction(path);
+  if (action === ":embedContent") return handleEmbedContent(c);
+  if (action === ":generateImage") return handleGenerateImage(c);
+  return handleGenerateContent(c, false);
+});
 
 export default geminiRouter;

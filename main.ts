@@ -206,8 +206,8 @@ app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
 
-// Gemini native protocol (mounted at root for /v1beta/ paths)
-app.route("/", geminiRouter);             // /v1beta/models/...
+// Gemini native protocol (mounted at /v1beta for /v1beta/ paths)
+app.route("/v1beta", geminiRouter);             // /v1beta/models/...
 
 app.route("/api/analytics", analyticsRouter); // /api/analytics/*
 

@@ -127,6 +127,16 @@ export class OpenAICompatAdapter implements ProviderAdapter {
       }
 
       const response = (await res.json()) as ChatCompletionResponse;
+      // Merge reasoning/reasoning_content into content for models like gpt-oss that put output there
+      for (const choice of response.choices ?? []) {
+        if (!choice.message?.content) {
+          if (choice.message?.reasoning_content) {
+            choice.message.content = choice.message.reasoning_content;
+          } else if ((choice.message as any).reasoning) {
+            choice.message.content = (choice.message as any).reasoning;
+          }
+        }
+      }
       return { response, latency_ms };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -139,6 +149,14 @@ export class OpenAICompatAdapter implements ProviderAdapter {
   /** Wrap a whole ChatCompletionResponse as a chunk iterator ending with a stop chunk. */
   private async *singleChunkStream(full: ChatCompletionResponse): AsyncIterable<ChatCompletionChunk> {
     const choice = full.choices?.[0];
+    // Merge reasoning/reasoning_content into content for models like gpt-oss
+    if (!choice?.message?.content) {
+      if (choice?.message?.reasoning_content) {
+        choice.message.content = choice.message.reasoning_content;
+      } else if ((choice?.message as any)?.reasoning) {
+        choice.message.content = (choice.message as any).reasoning;
+      }
+    }
     const base = {
       id: full.id,
       object: "chat.completion.chunk" as const,
@@ -177,7 +195,18 @@ export class OpenAICompatAdapter implements ProviderAdapter {
             const data = line.slice(6).trim();
             if (data === "[DONE]") continue;
             try {
-              yield JSON.parse(data) as ChatCompletionChunk;
+              const chunk = JSON.parse(data) as ChatCompletionChunk;
+              // Merge reasoning/reasoning_content into content for models like gpt-oss
+              for (const choice of chunk.choices ?? []) {
+                if (!choice.delta?.content) {
+                  if (choice.delta?.reasoning_content) {
+                    choice.delta.content = choice.delta.reasoning_content;
+                  } else if ((choice.delta as any)?.reasoning) {
+                    choice.delta.content = (choice.delta as any).reasoning;
+                  }
+                }
+              }
+              yield chunk;
             } catch {
               // Skip malformed chunks
             }

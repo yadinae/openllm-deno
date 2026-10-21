@@ -2,6 +2,10 @@
 
 | 日期 | 主题 | 类型 | 文件 |
 |---|---|---|---|
+| 2026-10-21 | Gemini 原生协议落地（复核：Hono catch-all 坑 + reasoning_content 合并） | 踩坑/修复/架构 | [2026-10-21-gemini-native.md](2026-10-21-gemini-native.md) |
+| 2026-10-21 | Decision Models (System One typed Q&A) 落地记录 | 架构/决策/实现 | [2026-10-21-decision-models.md](2026-10-21-decision-models.md) |
+| 2026-10-21 | routing-decision.ts 落地记录 | 架构/决策/实现 | [2026-10-21-routing-decision.md](2026-10-21-routing-decision.md) |
+| 2026-10-21 | MCP 集成增强 — 内置工具/资源处理器 | 踩坑/实现 | [2026-10-21-mcp-integration.md](2026-10-21-mcp-integration.md) |
 | 2026-10-20 | P1 核心评分系统移植完成：3 轴 Bandit 替代 4 轴、指数衰减、配额 headroom 接入路由 | 架构/决策/实现 | [2026-10-20-p1-scoring-provider-quota-port.md](2026-10-20-p1-scoring-provider-quota-port.md) |
 | 2026-10-20 | 签名目录同步 + auto 闸门：只路由有免费性证据的 395 条模型，假阳性清零 | 实现/记录 | [2026-10-20-catalog-sync-auto-gate.md](2026-10-20-catalog-sync-auto-gate.md) |
 | 2026-10-20 | 【对比】免费判定：原版靠准入(签名目录+字面'free')，models 表无 free 列；移植版三套判据并存、用「无价格即免费」致满屏假阳性 | 架构/调研 | [_cmp-free-detect.md](_cmp-free-detect.md) |

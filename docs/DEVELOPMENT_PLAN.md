@@ -94,10 +94,10 @@
 
 | 问题 | 影响 | 状态 | 备注 |
 |------|------|------|------|
-| **Dashboard 登录 401** | 管理后台无法登录 | 🔍 调查中 | `admin@openllm.local` / `openllm2026` 本地可登录，生产 401；旧 token 仍有效。疑似密码哈希或 session 存储差异。 |
+| **Dashboard 登录 401** | 管理后台无法登录 | ✅ 已解决 | 本地/生产均可登录，旧 token 兼容 |
 | **Deno Deploy token 缺失** | 无法自动部署 | ⏳ 待配置 | 需设置 `DENO_DEPLOY_TOKEN` 环境变量 |
 | **本地测试 41 失败** | 单元测试基线 | 📝 已知 | DB/网络依赖导致，CI 环境一致，不阻塞发布 |
-| **`FREE_PREFERENCE` 遗留** | 评分偏离原架构 | 🗑️ 待删除 | P0 过渡期产物，catalog 门控生效后应移除，避免双重偏向 |
+| **`FREE_PREFERENCE` 遗留** | 评分偏离原架构 | ✅ 已删除 | P0 过渡期产物，catalog 门控生效后已移除 |
 | **智力链归一化未完全生效** | 评分精度 | 🔧 进行中 | `route()` 中已计算 `_normIntelligence`，但 `calculateScore()` 仍用 `quality_score` 占位 |
 
 ---
