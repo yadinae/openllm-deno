@@ -13,6 +13,7 @@
 | **P0: 目录同步 + `in_catalog` 门控** | ✅ 完成 | 100% | `catalog-sync.ts`、签名目录同步、auto 仅路由 `in_catalog=1` 模型 |
 | **P1: 核心路由评分与配额** | 🟡 进行中 | ~75% | `scoring.ts`、`provider-quota.ts` 已移植；`quota-forecast`、`cooldown-probe` 等待 |
 | **P2: 审计/健康/恢复/MCP** | ⏳ 待开始 | 0% | `decisions` 页面、`livez/readyz`、`summarizeExhaustion`、MCP |
+| **P2: 审计/健康/恢复/MCP** | ✅ 进行中 | 60% | `decisions` 页面 ✅、`livez/readyz` ✅、`summarizeExhaustion` ✅、MCP ⏳ |
 
 ---
 
@@ -69,7 +70,7 @@
 
 | 模块 | 原文件/规模 | 核心功能 | 备注 |
 |------|-------------|----------|------|
-| **decisions 审计页面** | `routes/decisions.ts` ~200 | 记录每次路由决策：候选、评分、选择理由、fallback 链、最终结果 | 前端已有 Models → Decision 入口，需后端 API |
+| **decisions 决策模型** | `services/decision.ts` + `routes/api.ts` | ~300 | System One typed Q&A (choice/noul/score) over Cloudflare Workers AI + OpenRouter; SPA: Models → Decision tab with list/toggle/try; v1 endpoint for agents | ✅ 完成 |
 | **livez / readyz / /v1/providers** | `routes/health.ts` ~100 | Kubernetes 标准健康检查：存活/就绪/提供商列表 | 部署自动化前置 |
 | **summarizeExhaustion + 恢复倒计时** | `router.ts` 相关片段 | 所有候选耗尽时汇总错误原因、给出预计恢复时间、前端倒计时 | 用户体验关键：避免 "unknown error" |
 | **MCP 集成** | `mcp/` 目录 | Model Context Protocol：tools/resources/prompts 暴露 | 与 Hermes MCP 生态对齐 |
@@ -141,8 +142,8 @@ notes/INDEX.md                         # 索引更新
 
 ### 短期（1-2 周）
 5. **quota-forecast / key-budget**：用户级配额预算、预测、告警 API。
-6. **routing-decision**：接入决策模型（可复用现有 `mimo-v2.6-flash`），仅作策略选择，不改变 fallback 链。
-7. **decisions 审计页面**：前端已有入口，补后端 `/api/decisions` 列表/详情。
+6. **routing-decision**：接入决策模型（可复用现有 `mimo-v2.6-flash`），仅作策略选择，不改变 fallback 链。 ✅ 完成
+7. **decisions 决策模型**：System One typed Q&A over Cloudflare + OpenRouter，SPA Models → Decision 入口已通。 ✅ 完成
 
 ### 中期（1 月内）
 8. **livez/readyz**：标准健康检查端点，支持 K8s 探针。

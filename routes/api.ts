@@ -1293,4 +1293,110 @@ api.post("/url-tokens/:id/revoke", async (c: any) => {
   return c.json({ ok: true });
 });
 
+// ── Decisions (System One typed Q&A) ─────────────────────────────────────────
+import {
+  allDecisionRows,
+  getDecisionRow,
+  setDecisionEnabled,
+  runDecision,
+  syncDecisionModels,
+} from "../services/decision.ts";
+
+api.get("/decisions/models", async (c) => {
+  const rows = await allDecisionRows();
+  return c.json(
+    rows.map((r) => ({
+      id: r.id,
+      platform: r.platform,
+      modelId: r.model_id,
+      displayName: r.display_name,
+      priority: r.priority,
+      enabled: r.enabled === 1,
+      quotaLabel: r.quota_label,
+      meta: r.meta_json ? JSON.parse(r.meta_json) : null,
+    })),
+  );
+});
+
+api.patch("/decisions/models/:id", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return c.json({ error: { message: "Invalid model id" } }, 400);
+  }
+  const body = await c.req.json().catch(() => ({})) as { enabled?: boolean };
+  if (typeof body.enabled !== "boolean") {
+    return c.json({ error: { message: "Provide enabled" } }, 400);
+  }
+  const row = await setDecisionEnabled(id, body.enabled);
+  if (!row) {
+    return c.json({ error: { message: "Decision model not found" } }, 404);
+  }
+  return c.json({
+    id: row.id,
+    platform: row.platform,
+    modelId: row.model_id,
+    displayName: row.display_name,
+    priority: row.priority,
+    enabled: row.enabled === 1,
+    quotaLabel: row.quota_label,
+    meta: row.meta_json ? JSON.parse(row.meta_json) : null,
+  });
+});
+
+// "Try it" endpoint: run a single decision question
+api.post("/decisions/try", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    model?: string;
+    state: unknown;
+    question: string;
+    options: string[];
+  };
+  if (!body.state || !body.question || !Array.isArray(body.options) || body.options.length < 2) {
+    return c.json({ error: { message: "Provide state, a question and at least two options" } }, 400);
+  }
+  try {
+    const result = await runDecision(
+      {
+        state: body.state,
+        questions: {
+          answer: {
+            type: "choice",
+            instructions: body.question,
+            criteria: Object.fromEntries(body.options.map((o) => [o, null])),
+          },
+        },
+      },
+      { model: body.model, clientAgent: "dashboard" },
+    );
+    return c.json(result);
+  } catch (e) {
+    const err = e as { status?: number; message?: string; code?: string };
+    const status = (err.status ?? 502) as 400 | 401 | 403 | 404 | 429 | 500 | 502 | 503;
+    return c.json({ error: { message: err.message ?? "Decision failed", ...(err.code ? { code: err.code } : {}) } }, status);
+  }
+});
+
+// Main v1 decisions endpoint
+api.post("/v1/decisions", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as {
+    model?: string;
+    state: unknown;
+    questions: Record<string, unknown>;
+  };
+  if (!body.state || !body.questions || typeof body.questions !== "object") {
+    return c.json({ error: { message: "Provide state and questions" } }, 400);
+  }
+  try {
+    const result = await runDecision(
+      body as any,
+      { model: body.model, clientAgent: ((c as any).get("client_agent") as string) ?? "unknown" },
+    );
+    return c.json(result);
+  } catch (e) {
+    const err = e as { status?: number; message?: string; code?: string };
+    const status = (err.status ?? 502) as 400 | 401 | 403 | 404 | 429 | 500 | 502 | 503;
+    return c.json({ error: { message: err.message ?? "Decision failed", ...(err.code ? { code: err.code } : {}) } }, status);
+  }
+});
+
 export const apiCompat = api;
