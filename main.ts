@@ -31,6 +31,7 @@ import ollamaRouter from "./routes/ollama.ts";
 // P2
 import transcriptionRouter from "./routes/transcriptions.ts";
 import analyticsRouter from "./routes/analytics.ts";
+import geminiRouter from "./routes/gemini.ts";
 import {
   initDb as initPg,
   listApiKeys,
@@ -205,6 +206,9 @@ app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
 
+// Gemini native protocol (mounted at root for /v1beta/ paths)
+app.route("/", geminiRouter);             // /v1beta/models/...
+
 app.route("/api/analytics", analyticsRouter); // /api/analytics/*
 
 // ── Dashboard API (contract-compliant layer) ─────────────────────────────────
@@ -258,7 +262,7 @@ const DIST = `${Deno.cwd()}/dist`;
 
 app.all("*", async (c) => {
   const path = c.req.path;
-  if (path.startsWith("/api/") || path.startsWith("/v1/") || path === "/health") return c.notFound();
+  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health") return c.notFound();
 
   // Only GET/HEAD serve static content; everything else is a 404.
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.notFound();

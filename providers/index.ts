@@ -273,7 +273,7 @@ export const BUILTIN_PROVIDERS: ProviderConfig[] = [
     id: "google",
     name: "Google AI Studio",
     protocol: "gemini",
-    base_url: "https://generativelanguage.googleapis.com/v1beta",
+    base_url: "https://generativelanguage.googleapis.com",
     default_model: "gemini-1.5-flash",
     capabilities: {
       streaming: true,
