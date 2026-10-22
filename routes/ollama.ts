@@ -161,6 +161,8 @@ ollamaRouter.post("/api/chat", async (c) => {
       return new Response(readable, { headers: { "Content-Type": "application/x-ndjson" } });
     }
 
+    if (!result.response) throw new Error(`upstream returned no response body for ${body.model}`);
+
     return c.json(openAIToOllamaChat(result.response, body.model));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

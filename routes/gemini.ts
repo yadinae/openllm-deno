@@ -280,6 +280,8 @@ async function handleGenerateContent(c: any, _streamHint: boolean) {
       });
     }
 
+    if (!result.response) throw new Error(`upstream returned no response body for ${fullModel}`);
+
     return c.json(openAIToGemini(result.response, modelName));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -458,16 +460,6 @@ async function handleGenerateImage(c: any) {
 
 // Custom route handler for /models/* with colon actions
 // Hono doesn't match colon in path params, so we use a catch-all and dispatch manually
-const GEMINI_ACTIONS = [":generateContent", ":streamGenerateContent", ":countTokens", ":embedContent", ":generateImage"];
-
-function matchGeminiAction(path: string): string | null {
-  for (const action of GEMINI_ACTIONS) {
-    if (path.includes(action)) return action;
-  }
-  return null;
-}
-
-// Custom route handler for /models/* with colon actions — Hono doesn't match colon in path params, so we use a catch-all and dispatch manually
 const GEMINI_ACTIONS = [":generateContent", ":streamGenerateContent", ":countTokens", ":embedContent", ":generateImage"];
 
 function matchGeminiAction(path: string): string | null {

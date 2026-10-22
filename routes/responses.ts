@@ -159,6 +159,8 @@ responsesRouter.post("/responses", async (c) => {
       });
     }
 
+    if (!result.response) throw new Error(`upstream returned no response body for ${openAIReq.model}`);
+
     const resp = openAIToResponses(result.response!, openAIReq.model);
     return c.json(resp);
   } catch (e) {

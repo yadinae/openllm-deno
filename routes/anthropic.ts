@@ -171,6 +171,8 @@ anthropicRouter.post("/messages", async (c) => {
       });
     }
 
+    if (!result.response) throw new Error(`upstream returned no response body for ${body.model}`);
+
     const anthropicResp = openAIToAnthropic(result.response!, body.model);
     return c.json(anthropicResp);
   } catch (e) {
