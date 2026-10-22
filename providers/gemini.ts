@@ -157,6 +157,7 @@ export class GeminiAdapter implements ProviderAdapter {
         } catch {
           // Not JSON, use raw text
         }
+        if (!message.trim()) message = `HTTP ${res.status} from ${key.platform} (empty upstream error body)`;
         return { error: message, status: res.status, latency_ms };
       }
 
@@ -360,7 +361,7 @@ export class GeminiAdapter implements ProviderAdapter {
     gemini: GeminiGenerateContentResponse,
     originalModel: string
   ): ChatCompletionResponse {
-    const candidate = gemini.candidates[0];
+    const candidate = gemini.candidates?.[0];
     const content = candidate?.content?.parts
       .map((p) => p.text ?? "")
       .join("") || "";
@@ -380,10 +381,13 @@ export class GeminiAdapter implements ProviderAdapter {
           finish_reason: this.mapFinishReason(candidate?.finish_reason),
         },
       ],
+      // Gemini v1beta REST returns camelCase `usageMetadata`; the port's type
+      // declares snake_case `usage_metadata`. Reading either side unguarded
+      // threw TypeError on real responses.
       usage: {
-        prompt_tokens: gemini.usage_metadata.prompt_token_count,
-        completion_tokens: gemini.usage_metadata.candidates_token_count,
-        total_tokens: gemini.usage_metadata.total_token_count,
+        prompt_tokens: gemini.usage_metadata?.prompt_token_count ?? (gemini as any).usageMetadata?.promptTokenCount ?? 0,
+        completion_tokens: gemini.usage_metadata?.candidates_token_count ?? (gemini as any).usageMetadata?.candidatesTokenCount ?? 0,
+        total_tokens: gemini.usage_metadata?.total_token_count ?? (gemini as any).usageMetadata?.totalTokenCount ?? 0,
       },
     };
   }

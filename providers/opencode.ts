@@ -208,6 +208,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         } catch {
           // Not JSON, use raw text
         }
+        if (!message.trim()) message = `HTTP ${res.status} from ${key.platform} (empty upstream error body)`;
         return {
           error: message,
           status: res.status,

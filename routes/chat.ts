@@ -364,5 +364,14 @@ chatRouter.post("/chat/completions", async (c) => {
     );
   }
 
+  if (!result.response) {
+    // A provider result can carry neither error nor response (e.g. an upstream
+    // 4xx with an empty error body, or an adapter that only set `stream`).
+    // Returning c.json(undefined) here used to answer 200 with a 0-byte body.
+    const msg = `upstream returned no response body for ${body.model}`;
+    await requestLogger.logComplete(requestId, platform ?? "unknown", body.model, 0, undefined, body, null, Date.now() - startTime, 502, msg).catch(() => {});
+    return c.json({ error: { type: "upstream_error", message: msg } }, 502);
+  }
+
   return c.json(result.response);
 });
