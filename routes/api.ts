@@ -775,31 +775,38 @@ api.post("/keys/:idOrPlatform/probe", async (c) => {
 
   if (adapter) {
     const t0 = Date.now();
-    // Primary: validateKey (fast path for providers where /models validates keys)
+    let authOk = false;
+    let authError: string | null = null;
+
+    // ── Phase 1: validateKey (auth-level check) ──
+    // Tests whether the key is accepted by the provider at the auth layer.
+    // For most providers this is sufficient (e.g. /models returns 401 on bad keys).
     try {
       const validation = await adapter.validateKey(plain, { platform, keyId: entry.db_id });
       latency_ms = Date.now() - t0;
       if (typeof validation === "object") {
-        ok = validation.valid === true;
-        if (!ok) error = validation.error ?? "key validation failed";
+        authOk = validation.valid === true;
+        if (!authOk) authError = validation.error ?? "key validation failed";
       } else {
-        // legacy boolean return
-        ok = validation === true;
-        if (!ok) error = "key validation failed";
+        authOk = validation === true;
+        if (!authOk) authError = "key validation failed";
       }
     } catch (e: any) {
       latency_ms = Date.now() - t0;
-      error = e instanceof Error ? e.message : String(e);
+      authError = e instanceof Error ? e.message : String(e);
     }
-    // Secondary: always verify with a minimal chat completion.
-    // Some providers (e.g. NVIDIA) return 200 on /models even with invalid keys,
-    // so validateKey alone is insufficient. A real chat completion requires auth
-    // and definitively proves the key works.
-    // NOTE: `nvidia/meta/llama-3.3-70b-instruct` was decommissioned (410 Gone
-    // on 2026-08-26); use a live model per-platform.
+
+    // ── Phase 2: chat completion (functional check) ──
+    // validateKey alone is insufficient for some providers (NVIDIA returns 200
+    // on /models even with invalid keys). A real chat completion proves the key
+    // can actually generate responses.
+    //
+    // IMPORTANT: we must distinguish auth errors from model-availability errors.
+    //   - 401/403 / "unauthorized" / "invalid api key"  → key is BAD
+    //   - "Function not found" / 410 / "model not found"  → key is GOOD, model issue
+    //   - 429 / timeout / network                        → inconclusive, don't fail
     if (adapter.chat) {
       try {
-        // Per-platform probe models — must be live on each provider.
         const probeModels: Record<string, string> = {
           nvidia: "nvidia/llama-3.1-nemotron-70b-instruct",
           anthropic: "claude-3-haiku-20240307",
@@ -817,11 +824,49 @@ api.post("/keys/:idOrPlatform/probe", async (c) => {
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 3,
         }, testKey as never, { timeout_ms: 8_000 });
+
         latency_ms = Date.now() - t0;
-        ok = !chatResult.error;
-        if (!ok) error = chatResult.error ?? "chat failed";
-      } catch { /* ignore */ }
+        const chatErr = chatResult.error;
+        if (!chatErr) {
+          // Chat succeeded → key is definitely valid
+          authOk = true;
+          authError = null;
+        } else {
+          // Classify the chat error
+          const lower = chatErr.toLowerCase();
+          const isAuthError =
+            lower.includes("401") ||
+            lower.includes("403") ||
+            lower.includes("unauthorized") ||
+            lower.includes("invalid api key") ||
+            lower.includes("invalid jwt") ||
+            lower.includes("api key") ||
+            lower.includes("authentication");
+          const isModelError =
+            lower.includes("not found") ||
+            lower.includes("not found for account") ||
+            lower.includes("410") ||
+            lower.includes("gone") ||
+            lower.includes("decommissioned") ||
+            lower.includes("model") && (lower.includes("not available") || lower.includes("no longer"));
+
+          if (isAuthError) {
+            // Chat confirms auth failure → key is bad
+            authOk = false;
+            authError = chatErr;
+          } else if (isModelError) {
+            // Model issue, not key issue → key is fine, don't fail
+            // Keep authOk from Phase 1 (or default to true if Phase 1 was inconclusive)
+            if (!authError) authOk = true;
+            authError = null;
+          }
+          // else: inconclusive (429, timeout, etc.) → keep Phase 1 result
+        }
+      } catch { /* network/timeout — keep Phase 1 result */ }
     }
+
+    ok = authOk;
+    error = authError;
   } else {
     error = `Provider ${platform} not registered`;
   }
