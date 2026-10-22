@@ -101,11 +101,21 @@ chatRouter.post("/chat/completions", async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
+    return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON body" } }, 400);
   }
 
-  if (!body.model || !Array.isArray(body.messages)) {
-    return c.json({ error: "model and messages are required" }, 400);
+  if (!Array.isArray(body.messages)) {
+    return c.json({ error: { type: "invalid_request_error", message: "messages are required" } }, 400);
+  }
+
+  // An omitted `model` means "let the router choose" — the playground SPA sends
+  // no model field at all when the model picker is on "auto"
+  // (`g !== 'auto' && (f.model = g)` in the built bundle), and FreeLLMAPI
+  // treated a missing model as auto-routing. Rejecting it here made the
+  // playground's default state fail with "model and messages are required"
+  // before the `auto` branch below could ever run.
+  if (!body.model) {
+    body.model = "auto";
   }
 
   // ── Virtual models (FreeLLMAPI parity) ──────────────────────────────────
@@ -216,7 +226,7 @@ chatRouter.post("/chat/completions", async (c) => {
   const keyEntry = candidates[0] ?? enabled[0];
 
   if (!keyEntry) {
-    return c.json({ error: "No API keys configured" }, 503);
+    return c.json({ error: { type: "configuration_error", message: "No API keys configured" } }, 503);
   }
 
   let secret: string | null = null;
@@ -224,7 +234,7 @@ chatRouter.post("/chat/completions", async (c) => {
     secret = await decryptKey(keyEntry.encrypted_key, keyEntry.iv, keyEntry.auth_tag).catch(() => null);
   }
   if (!secret) {
-    return c.json({ error: "Failed to decrypt key for " + platform }, 500);
+    return c.json({ error: { type: "configuration_error", message: `Failed to decrypt key for ${platform}` } }, 500);
   }
 
   // Build ApiKey object for the provider adapter

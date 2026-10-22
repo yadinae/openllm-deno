@@ -175,7 +175,8 @@ export function estimateExhaustionAt(
 /** Recent successful traffic grouped by the same key/pool identity used for observations. */
 export async function getRecentQuotaActivity(now = Date.now()): Promise<RecentQuotaActivity[]> {
   try {
-    initDb();
+// await 而不是 initDb(); —— 该 promise 会 reject，飘着的 rejection 会让 Deno 直接终止 isolate
+    await initDb();
     const since = toSqliteUtc(now - RATE_OBSERVATION_WINDOW_MINUTES * 60_000);
     const rows = await query`
       SELECT platform, key_id AS "keyId", model_id AS "modelId", COUNT(*) AS count

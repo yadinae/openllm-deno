@@ -235,10 +235,12 @@ export class OpencodeAdapter implements ProviderAdapter {
   }
 
   /** List available models */
-  async models(): Promise<ModelInfo[]> {
+  async models(key?: ApiKey): Promise<ModelInfo[]> {
     const url = `${this.base_url.replace(/\/$/, "")}/models`;
 
-    const authHeader = this.isAnonymous ? "Bearer public" : "Bearer test";
+    const authHeader = key
+      ? `Bearer ${key.encrypted_key}`
+      : (this.isAnonymous ? "Bearer public" : "Bearer test");
 
     try {
       const res = await fetch(url, {

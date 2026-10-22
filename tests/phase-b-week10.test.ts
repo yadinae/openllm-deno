@@ -28,6 +28,15 @@ import type { ChatCompletionRequest, ChatCompletionResponse, ApiKey, ProviderRes
 
 initializeRegistry();
 
+const HAS_DB = !!Deno.env.get("DATABASE_URL");
+const HAS_NETWORK = !!Deno.env.get("TEST_NETWORK");
+if (!HAS_DB) {
+  console.log("[phase-b-week10] DATABASE_URL not set — DB-dependent tests will be skipped");
+}
+if (!HAS_NETWORK) {
+  console.log("[phase-b-week10] TEST_NETWORK not set — network-dependent tests will be skipped");
+}
+
 const MOCK_API_KEY: ApiKey = {
   id: "test",
   db_id: 1,
@@ -230,6 +239,7 @@ Deno.test("Provider: GeminiAdapter - models() returns supported models with free
 
 // ============================================================================
 // OpenAICompatAdapter Tests (Extended)
+if (HAS_NETWORK) {
 // ============================================================================
 
 Deno.test("Provider: OpenAICompatAdapter - models() includes free detection", async () => {
@@ -260,6 +270,8 @@ Deno.test("Provider: OpenAICompatAdapter - models() includes free detection", as
   assert(typeof models.length === "number");
 });
 
+}
+
 Deno.test("Provider: OpenAICompatAdapter - streaming chunk format", () => {
   const adapter = new OpenAICompatAdapter({
     id: "test",
@@ -283,9 +295,9 @@ Deno.test("Provider: OpenAICompatAdapter - streaming chunk format", () => {
 // Provider Registry Tests
 // ============================================================================
 
-Deno.test("Provider: Registry - all 33 providers registered", () => {
+Deno.test("Provider: Registry - all 36 providers registered", () => {
   const ids = providerRegistry.getAllIds();
-  assertEquals(ids.length, 33);
+  assertEquals(ids.length, 36);
 });
 
 Deno.test("Provider: Registry - Anthropic and Gemini use specialized adapters", () => {
@@ -306,7 +318,7 @@ Deno.test("Provider: Registry - protocol distribution", () => {
       counts[entry.config.protocol] = (counts[entry.config.protocol] || 0) + 1;
     }
   }
-  assertEquals(counts.openai, 31);
+  assertEquals(counts.openai, 34);
   assertEquals(counts.anthropic, 1);
   assertEquals(counts.gemini, 1);
 });
@@ -316,13 +328,52 @@ Deno.test("Provider: Registry - getByProtocol returns correct adapters", () => {
   const anthropicAdapters = providerRegistry.getByProtocol("anthropic");
   const geminiAdapters = providerRegistry.getByProtocol("gemini");
 
-  assertEquals(openaiAdapters.length, 31);
+  assertEquals(openaiAdapters.length, 34);
   assertEquals(anthropicAdapters.length, 1);
   assertEquals(geminiAdapters.length, 1);
 });
 
 // ============================================================================
+// REGRESSION TESTS — added after fixes to prevent future regressions
+// ============================================================================
+
+import { getAdapterForPlatform } from "../providers/index.ts";
+
+Deno.test("REGRESSION: google uses GeminiAdapter via protocol dispatch (not id)", () => {
+  // This test guards against the bug where google (id="google", protocol="gemini")
+  // fell through the switch on config.id and got OpenAICompatAdapter instead of
+  // GeminiAdapter, causing upstream 404 empty-body errors.
+  // See notes/2026-10-22-gemini-boot-failure-and-empty-error-body.md
+  const adapter = getAdapterForPlatform("google");
+  assertExists(adapter);
+  assertEquals(adapter.constructor.name, "GeminiAdapter");
+});
+
+import { recordUpstreamQuota } from "../providers/quota-observation.ts";
+
+Deno.test("REGRESSION: recordUpstreamQuota does not leak unhandled rejection when no DB", async () => {
+  // In file mode (no DATABASE_URL) the old fire-and-forget initDb() would reject
+  // an unhandled promise, which Deno treats as a fatal error and kills the isolate.
+  // This test calls the quota recording path with a fake response and verifies
+  // no synchronous throw and no leaked rejection (test runner would surface it).
+  const fakeKey = {
+    id: "test-key",
+    platform: "test",
+    encrypted_key: "x".repeat(32),
+    iv: "x".repeat(16),
+    auth_tag: "x".repeat(16),
+    base_url: "https://example.com",
+  };
+  const fakeHeaders = new Headers({ "content-type": "application/json" });
+  // Must not throw synchronously
+  recordUpstreamQuota(fakeKey, "test", "test-model", 200, fakeHeaders, { endpoint: "/test", origin: "test" });
+  // Yield to event loop; if a rejection leaked, the test runner would catch it
+  await new Promise((r) => setTimeout(r, 0));
+});
+
+// ============================================================================
 // Free Model Detection Service Tests
+if (HAS_NETWORK) {
 // ============================================================================
 
 Deno.test("FreeDetect: detectFreeModelCached - whitelist tier", async () => {
@@ -420,8 +471,11 @@ Deno.test("FreeDetect: background refresh start/stop", () => {
   stopBackgroundRefresh();
 });
 
+}
+
 // ============================================================================
 // Health Check Tests
+if (HAS_NETWORK) {
 // ============================================================================
 
 Deno.test("Health: AnthropicAdapter.test() - returns TestResult shape", async () => {
@@ -494,8 +548,11 @@ Deno.test("Health: OpenAICompatAdapter.test() - returns TestResult shape", async
   }
 });
 
+}
+
 // ============================================================================
 // Circuit Breaker / Cooldown Tests
+if (HAS_DB) {
 // ============================================================================
 
 Deno.test("CircuitBreaker: CooldownManager - set and check cooldown", async () => {
@@ -553,8 +610,11 @@ Deno.test("CircuitBreaker: CooldownManager - multiple keys isolation", async () 
   }
 });
 
+}
+
 // ============================================================================
 // Integration Tests
+if (HAS_DB && HAS_NETWORK) {
 // ============================================================================
 
 Deno.test("Integration: executeChat with OpenAI provider", async () => {
@@ -712,9 +772,7 @@ Deno.test("Edge: Free detection with unknown provider uses zero pricing fallback
   assertEquals(result.tier, "zero_pricing");
 });
 
-// ============================================================================
-// Run
-// ============================================================================
+}
 
 if (import.meta.url === Deno.mainModule) {
   console.log("Running Phase B Week 10 Provider Ecosystem Tests...");

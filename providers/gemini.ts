@@ -113,6 +113,9 @@ export class GeminiAdapter implements ProviderAdapter {
       : `${this.base_url}/v1beta/models/${modelId}:generateContent`;
 
     const timeoutMs = options?.timeout_ms ?? 60_000;
+    if (Deno.env.get("OPENLLM_DEBUG_UPSTREAM") === "1") {
+      console.log(`[dbg][gemini] base=${JSON.stringify(this.base_url)} url=${streamUrl} headerKeyLen=${key.encrypted_key?.length ?? -1}`);
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -183,7 +186,7 @@ export class GeminiAdapter implements ProviderAdapter {
 
   /** List available models — Gemini doesn't have a simple public /models endpoint
    * without auth, so return from capabilities.supported_models. */
-  async models(): Promise<ModelInfo[]> {
+  async models(_key?: ApiKey): Promise<ModelInfo[]> {
     const models = this.capabilities.supported_models ?? [];
     return models.map((m) => {
       const freeStatus = detectFreeModel(this.id, m, this.capabilities.pricing);

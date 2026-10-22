@@ -156,8 +156,8 @@ export interface ProviderAdapter {
     options?: RequestOptions
   ): Promise<ProviderResult>;
 
-  /** List available models */
-  models(): Promise<ModelInfo[]>;
+  /** List available models. Optional `key` enables per-key model listing (used by probes). */
+  models(key?: ApiKey): Promise<ModelInfo[]>;
 
   /** Test provider connectivity and key validity */
   test(key: ApiKey): Promise<TestResult>;

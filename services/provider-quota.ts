@@ -313,7 +313,8 @@ export async function recordQuotaObservation(input: QuotaObservationInput): Prom
   const rawJson = input.rawJson ?? null;
 
   try {
-    initDb();
+// await 而不是 initDb(); —— 该 promise 会 reject，飘着的 rejection 会让 Deno 直接终止 isolate
+    await initDb();
     const nowSql = toSqliteUtc(observedAt);
     const updatedAt = nowSql;
 
@@ -397,7 +398,8 @@ export async function getKeyQuotaHeadroom(platform: string): Promise<Map<number,
   if (cached && now - cached.at < HEADROOM_TTL_MS) return cached.map;
 
   try {
-    initDb();
+// await 而不是 initDb(); —— 该 promise 会 reject，飘着的 rejection 会让 Deno 直接终止 isolate
+    await initDb();
     const rows = await query`
       SELECT key_id AS keyId,
              limit_value AS limitValue,
@@ -438,7 +440,8 @@ export function invalidateKeyQuotaHeadroom(platform?: string): void {
 
 export async function getQuotaStateForKeys(options: { normalizeExpired?: boolean } = {}): Promise<QuotaObservationView[]> {
   try {
-    initDb();
+// await 而不是 initDb(); —— 该 promise 会 reject，飘着的 rejection 会让 Deno 直接终止 isolate
+    await initDb();
     const rows = await query`
       SELECT platform, key_id AS keyId, provider_account_id AS providerAccountId,
              model_id AS modelId, quota_pool_key AS quotaPoolKey, metric,

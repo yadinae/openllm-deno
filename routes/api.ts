@@ -255,9 +255,27 @@ api.get("/keys/providers", async (c) => {
     hasKey: true,
     keyCount: entries.filter(e => e.platform === p).length,
   }));
+  // Summary must match the frontend's PLATFORMS free-list (65 providers)
+  // so that the top badge and the provider list show consistent counts.
+  const freeListPlatforms = new Set([
+    "aclide", "speka", "auray", "typhoon", "plugsky", "inferbase", "simplellm",
+    "llmtr", "gizmo", "blockrun", "moondream", "google", "groq", "cerebras",
+    "sail", "electronhub", "experiential", "router9", "septor", "clod",
+    "speechify", "freeai", "blaze", "lucidity", "airforce", "dreamprompting",
+    "waterfall", "logfare", "bai", "radeon", "nvidia", "mistral", "openrouter",
+    "github", "cohere", "cloudflare", "zhipu", "ollama", "kilo", "pollinations",
+    "ovh", "llm7", "huggingface", "opencode", "agnes", "reka", "siliconflow",
+    "routeway", "bazaarlink", "ainative", "aion", "requesty", "navy", "nara",
+    "sealion", "orcarouter", "unorouter", "xkiro", "anyapi", "modelscope",
+    "aihorde", "qianfan", "volcengine", "longcat", "xfyun",
+  ]);
+  const filtered = providers.filter(p => freeListPlatforms.has(p.platform));
   return c.json({
-    providers,
-    summary: { configured: providers.filter(p => p.configured).length, total: providers.length },
+    providers: filtered,
+    summary: {
+      configured: filtered.filter(p => p.configured).length,
+      total: filtered.length,
+    },
   });
 });
 
@@ -757,21 +775,45 @@ api.post("/keys/:idOrPlatform/probe", async (c) => {
 
   if (adapter) {
     const t0 = Date.now();
-    // Prefer models() listing (lightweight) over chat test
+    // Primary: validateKey (fast path for providers where /models validates keys)
     try {
-      const models = await adapter.models();
+      const validation = await adapter.validateKey(plain, { platform, keyId: entry.db_id });
       latency_ms = Date.now() - t0;
-      ok = models.length > 0;
-      if (!ok) error = "provider returned 0 models";
+      if (typeof validation === "object") {
+        ok = validation.valid === true;
+        if (!ok) error = validation.error ?? "key validation failed";
+      } else {
+        // legacy boolean return
+        ok = validation === true;
+        if (!ok) error = "key validation failed";
+      }
     } catch (e: any) {
       latency_ms = Date.now() - t0;
       error = e instanceof Error ? e.message : String(e);
     }
-    // Fallback: try a minimal chat if models() didn't work
-    if (!ok && adapter.chat) {
+    // Secondary: always verify with a minimal chat completion.
+    // Some providers (e.g. NVIDIA) return 200 on /models even with invalid keys,
+    // so validateKey alone is insufficient. A real chat completion requires auth
+    // and definitively proves the key works.
+    // NOTE: `nvidia/meta/llama-3.3-70b-instruct` was decommissioned (410 Gone
+    // on 2026-08-26); use a live model per-platform.
+    if (adapter.chat) {
       try {
+        // Per-platform probe models — must be live on each provider.
+        const probeModels: Record<string, string> = {
+          nvidia: "nvidia/llama-3.1-nemotron-70b-instruct",
+          anthropic: "claude-3-haiku-20240307",
+          google: "gemini-2.5-flash",
+          openrouter: "openai/gpt-oss-20b",
+          groq: "llama-3.3-70b-versatile",
+          zhipu: "glm-4-flash",
+          agnes: "agnes-v2.6-flash",
+          kilo: "openai/gpt-oss-120b",
+          radeon: "meta-llama/llama-3-1-70b-instruct",
+        };
+        const probeModel = probeModels[platform] ?? "openai/gpt-oss-20b";
         const chatResult = await adapter.chat({
-          model: "nvidia/meta/llama-3.3-70b-instruct",
+          model: probeModel,
           messages: [{ role: "user", content: "hi" }],
           max_tokens: 3,
         }, testKey as never, { timeout_ms: 8_000 });

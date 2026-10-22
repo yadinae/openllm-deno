@@ -18,8 +18,13 @@ const initializeRegistry = async () => {
 
 await initializeRegistry();
 
+const HAS_DB = !!Deno.env.get("DATABASE_URL");
+if (!HAS_DB) {
+  console.log("[phase-c-week13-14] DATABASE_URL not set — skipping DB-dependent test sections");
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// SEARCH SERVICE TESTS
+// SEARCH SERVICE TESTS (no DB required)
 // ════════════════════════════════════════════════════════════════════════════
 
 Deno.test("Search: listSearchEngines returns all configured engines", () => {
@@ -120,8 +125,10 @@ Deno.test("MCP: Custom tool registration works", async () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// CUSTOM MODEL LIFECYCLE TESTS
+// CUSTOM MODEL LIFECYCLE TESTS (requires DB)
 // ════════════════════════════════════════════════════════════════════════════
+
+if (HAS_DB) {
 
 Deno.test("CustomModel: Registration creates model with pending_sync status", async () => {
   const registration: ModelRegistration = {
@@ -213,9 +220,13 @@ Deno.test("CustomModel: Retire transitions to retired (terminal state)", async (
   assertEquals(retired!.tombstone_reason, "End of life");
 });
 
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// CLIENT PROFILES TESTS
+// CLIENT PROFILES TESTS (requires DB)
 // ════════════════════════════════════════════════════════════════════════════
+
+if (HAS_DB) {
 
 Deno.test("ClientProfile: Create returns profile and API key", async () => {
   const { profile, api_key } = await clientProfileService.create({
@@ -335,9 +346,13 @@ Deno.test("ClientProfile: Record usage and get forecast", async () => {
   assert(["none", "warning", "upgrade"].includes(forecast.recommended_action));
 });
 
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// AUTH CLIENTS TESTS
+// AUTH CLIENTS TESTS (requires DB)
 // ════════════════════════════════════════════════════════════════════════════
+
+if (HAS_DB) {
 
 Deno.test("AuthClient: Create returns client and secret", async () => {
   const { client, client_secret } = await authClientService.create({
@@ -420,9 +435,13 @@ Deno.test("AuthClient: Rotate secret works", async () => {
   assertNotEquals(updated!.client_secret_prefix, oldPrefix);
 });
 
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// URL TOKENS TESTS
+// URL TOKENS TESTS (requires DB)
 // ════════════════════════════════════════════════════════════════════════════
+
+if (HAS_DB) {
 
 Deno.test("URLToken: Create returns token and raw token", async () => {
   // First create a client profile to reference
@@ -532,8 +551,10 @@ Deno.test("URLToken: Max uses exceeded returns null", async () => {
   assertEquals(token2, null);
 });
 
+}
+
 // ════════════════════════════════════════════════════════════════════════════
-// EMBEDDINGS TESTS
+// EMBEDDINGS TESTS (no DB required)
 // ════════════════════════════════════════════════════════════════════════════
 
 Deno.test("Embeddings: listEmbeddingModels returns expected providers", () => {
@@ -574,8 +595,10 @@ Deno.test("Media: generateMedia function exists", () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// INTEGRATION TESTS
+// INTEGRATION TESTS (requires DB)
 // ════════════════════════════════════════════════════════════════════════════
+
+if (HAS_DB) {
 
 Deno.test("Integration: Client Profile + URL Token + Quota flow", async () => {
   // 1. Create client profile
@@ -639,5 +662,7 @@ Deno.test("Integration: MCP Server + Custom Model + Search engines", async () =>
   const engines = listSearchEngines();
   assert(engines.length > 0);
 });
+
+}
 
 console.log("All Phase C Week 13-14 tests passed!");

@@ -300,23 +300,38 @@ app.all("*", async (c) => {
 });
 
 // ── Cron Jobs (native Deno.cron) ─────────────────────────────────────────────
-// Auto-discovers models for all enabled providers every 6 hours.
-// Deno.cron requires --unstable-cron flag locally; on Deno Deploy it's enabled.
-// Guard so local file-mode runs don't crash.
-try {
-  Deno.cron("auto-discover", "0 */6 * * *", async () => {
-    const results = await runDiscoveryCron();
-    for (const [platform, info] of Object.entries(results)) {
-      if (info.error) {
-        console.error(`[cron][${platform}] error: ${info.error}`);
-      } else {
-        console.log(`[cron][${platform}] discovered ${info.total} models`);
-      }
-    }
-  });
-} catch {
-  console.log("[openllm] Deno.cron unavailable (local run) — skipping auto-discover cron");
+// Deno.cron only exists on Deno Deploy (locally it needs --unstable-cron), so
+// every schedule goes through this helper. A bare try/catch is NOT enough: when
+// the call sits inside an async `.then()` callback the missing-API TypeError
+// becomes an unhandled rejection and kills the whole isolate — that is exactly
+// how boot died before (`Deno.cron is not a function` at the catalog-sync cron),
+// which is why no one could run the app locally.
+function scheduleCron(name: string, schedule: string, handler: () => void | Promise<void>): boolean {
+  if (typeof (Deno as { cron?: unknown }).cron !== "function") {
+    console.log(`[openllm] Deno.cron unavailable (local run) — skipping ${name} cron`);
+    return false;
+  }
+  try {
+    (Deno as unknown as { cron: (n: string, s: string, h: () => void | Promise<void>) => void })
+      .cron(name, schedule, handler);
+    return true;
+  } catch (e) {
+    console.error(`[openllm] failed to schedule ${name} cron:`, e);
+    return false;
+  }
 }
+
+// Auto-discovers models for all enabled providers every 6 hours.
+scheduleCron("auto-discover", "0 */6 * * *", async () => {
+  const results = await runDiscoveryCron();
+  for (const [platform, info] of Object.entries(results)) {
+    if (info.error) {
+      console.error(`[cron][${platform}] error: ${info.error}`);
+    } else {
+      console.log(`[cron][${platform}] discovered ${info.total} models`);
+    }
+  }
+});
 
 // ── Free Model Detection Background Refresh (Phase B Week 9) ───────────────────
 // Refreshes pricing cache and clears free model cache every 6 hours.
@@ -359,19 +374,26 @@ try {
         r.ok
           ? console.log(`[catalog-sync] boot sync ok: v${r.version} upserted=${r.upserted} retired=${r.retired}`)
           : console.error(`[catalog-sync] boot sync failed: ${r.error}`)
-      );
+      ).catch((e) => {
+        // Fire-and-forget must never reject unhandled: without this catch a
+        // missing DATABASE_URL killed the whole isolate 15s after boot.
+        console.log("[catalog-sync] boot kick skipped:", e instanceof Error ? e.message : e);
+      });
     }, 15_000);
 
     // Then schedule daily at 04:30 UTC (after daily quota resets for most providers).
-    Deno.cron("catalog-sync", "30 4 * * *", async () => {
+    if (scheduleCron("catalog-sync", "30 4 * * *", async () => {
       const r = await syncSignedCatalog();
       if (r.ok) {
         console.log(`[catalog-sync] ${r.version} upserted=${r.upserted} retired=${r.retired}`);
       } else {
         console.error(`[catalog-sync] failed: ${r.error}`);
       }
-    });
-    console.log("[openllm] catalog-sync cron scheduled (daily 04:30 UTC + boot kick)");
+    })) {
+      console.log("[openllm] catalog-sync cron scheduled (daily 04:30 UTC + boot kick)");
+    }
+  }).catch((e) => {
+    console.log("[openllm] catalog-sync unavailable (local run or import error) — skipping:", e instanceof Error ? e.message : e);
   });
 } catch {
   console.log("[openllm] catalog-sync unavailable (local run or import error) — skipping");

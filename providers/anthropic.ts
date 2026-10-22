@@ -164,7 +164,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   /** List available models — Anthropic doesn't have a public /models endpoint,
    * so return from capabilities.supported_models with free detection. */
-  async models(): Promise<ModelInfo[]> {
+  async models(_key?: ApiKey): Promise<ModelInfo[]> {
     const models = this.capabilities.supported_models ?? [];
     return models.map((m) => {
       const freeStatus = detectFreeModel(this.id, m, this.capabilities.pricing);

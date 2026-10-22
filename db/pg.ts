@@ -704,6 +704,14 @@ export async function initDb(): Promise<void> {
     _sql = null;
     throw e;
   });
+  // The shared promise MUST carry its own no-op handler. Several call sites fire
+  // `initDb();` without awaiting it (services/provider-quota.ts ×3,
+  // quota-forecast.ts ×1) — a rejected `_ready` with no handler in that tick is
+  // an unhandled rejection, and Deno **terminates the isolate** on one. That is
+  // how a single proxied request killed the whole process whenever
+  // DATABASE_URL was missing. Awaiters still receive the rejection; V8 only
+  // needs a handler to exist on the promise.
+  _ready.catch(() => {});
   return _ready;
 }
 

@@ -170,7 +170,7 @@ export class OllamaAdapter implements ProviderAdapter {
     }
   }
 
-  async models(): Promise<ModelInfo[]> {
+  async models(_key?: ApiKey): Promise<ModelInfo[]> {
     try {
       const res = await fetch(`${this.base_url}/api/tags`, {
         headers: { "Content-Type": "application/json" },

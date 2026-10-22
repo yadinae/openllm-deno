@@ -731,25 +731,29 @@ export const BUILTIN_PROVIDERS: ProviderConfig[] = [
 export function initializeRegistry(): void {
   for (const config of BUILTIN_PROVIDERS) {
     if (!providerRegistry.get(config.id)) {
+      // Dispatch on PROTOCOL, not id. The id is the platform slug and the
+      // protocol is the wire format; they differ for exactly the providers that
+      // have a dedicated adapter: id "google" speaks protocol "gemini". Keying
+      // the switch off config.id sent google into the OpenAI-compat default,
+      // which then POSTed an OpenAI body to `https://generativelanguage.
+      // googleapis.com/<…>/chat/completions` — a path Google's front end
+      // answers with a bare `404` and an empty body (verified: Google returns
+      // JSON errors for *known* paths, empty 404 for unknown ones). That empty
+      // body then became a falsy `error` downstream — see
+      // notes/2026-10-22-gemini-boot-failure-and-empty-error-body.md.
       let adapter: ProviderAdapter;
-      switch (config.id) {
-        case "opencode":
-          adapter = new OpencodeAdapter(config, false); // keyed
-          break;
-        case "opencode-free":
-          adapter = new OpencodeAdapter(config, true); // anonymous
-          break;
-        case "anthropic":
-          adapter = new AnthropicAdapter(config);
-          break;
-        case "gemini":
-          adapter = new GeminiAdapter(config);
-          break;
-        case "ollama":
-          adapter = new OllamaAdapter(config);
-          break;
-        default:
-          adapter = new OpenAICompatAdapter(config);
+      if (config.id === "opencode") {
+        adapter = new OpencodeAdapter(config, false); // keyed
+      } else if (config.id === "opencode-free") {
+        adapter = new OpencodeAdapter(config, true); // anonymous
+      } else if (config.protocol === "anthropic") {
+        adapter = new AnthropicAdapter(config);
+      } else if (config.protocol === "gemini") {
+        adapter = new GeminiAdapter(config);
+      } else if (config.id === "ollama") {
+        adapter = new OllamaAdapter(config); // protocol is "custom"
+      } else {
+        adapter = new OpenAICompatAdapter(config);
       }
       providerRegistry.register(config, adapter);
     }
@@ -788,6 +792,11 @@ export async function executeChat(
   const adapter = providerRegistry.get(key.platform);
   if (!adapter) {
     return { error: `Provider ${key.platform} not registered`, status: 503 };
+  }
+  if (Deno.env.get("OPENLLM_DEBUG_UPSTREAM") === "1") {
+    const cfgUrl = providerRegistry.getEntry(key.platform)?.config.base_url;
+    const proto = providerRegistry.getEntry(key.platform)?.config.protocol;
+    console.log(`[dbg][dispatch] platform=${key.platform} adapter=${adapter.constructor.name} protocol=${proto} registry_base=${JSON.stringify(cfgUrl)} keyRow_base=${JSON.stringify(key.base_url)} secretLen=${key.encrypted_key?.length ?? -1} model=${request.model}`);
   }
 
   // Estimate tokens for quota check

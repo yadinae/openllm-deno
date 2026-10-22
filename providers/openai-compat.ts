@@ -220,12 +220,15 @@ export class OpenAICompatAdapter implements ProviderAdapter {
   }
 
   /** List available models */
-  async models(): Promise<ModelInfo[]> {
+  async models(key?: ApiKey): Promise<ModelInfo[]> {
     const url = `${this.base_url.replace(/\/$/, "")}/models`;
 
     try {
+      const authHeader = key
+        ? `Bearer ${key.encrypted_key}`
+        : `Bearer ${this.getTestKey()}`;
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${this.getTestKey()}` },
+        headers: { Authorization: authHeader },
       });
 
       if (!res.ok) return [];
