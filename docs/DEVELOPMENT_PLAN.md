@@ -1,7 +1,7 @@
 # OpenLLM Deno — 未完成事项与后续开发计划
 
 > 本文档记录从 FreeLLMAPI (Node/Express/SQLite) 移植到 OpenLLM (Deno/Hono/Postgres) 的功能对比差距、已完成工作、未完成事项与优先级排期。
-> 更新时间：2026-10-20
+> 更新时间：2026-10-22（P1/P2 状态与"已知问题"表按实测刷新）
 > 关联对比文档：`notes/_cmp-gap-matrix.md`、`notes/_cmp-auto-routing.md`、`notes/_cmp-free-detect.md`
 
 ---
@@ -11,9 +11,8 @@
 | 阶段 | 状态 | 完成度 | 备注 |
 |------|------|--------|------|
 | **P0: 目录同步 + `in_catalog` 门控** | ✅ 完成 | 100% | `catalog-sync.ts`、签名目录同步、auto 仅路由 `in_catalog=1` 模型 |
-| **P1: 核心路由评分与配额** | 🟡 进行中 | ~75% | `scoring.ts`、`provider-quota.ts` 已移植；`quota-forecast`、`cooldown-probe` 等待 |
-| **P2: 审计/健康/恢复/MCP** | ⏳ 待开始 | 0% | `decisions` 页面、`livez/readyz`、`summarizeExhaustion`、MCP |
-| **P2: 审计/健康/恢复/MCP** | ✅ 完成 | 100% | `decisions` 页面 ✅、`livez/readyz` ✅、`summarizeExhaustion` ✅、MCP ✅ |
+| **P1: 核心路由评分与配额** | ✅ 完成 | 100% | `scoring` / `provider-quota` / `quota-forecast` / `key-budget` / `cooldown-probe` / `model-state` / `routing-decision` 均已落地（2026-10-20~21） |
+| **P2: 审计/健康/恢复/MCP/原生协议** | ✅ 完成 | 100% | `decisions`、`livez`/`readyz`、`summarizeExhaustion`、MCP、Gemini `/v1beta` 原生面 |
 
 ---
 
@@ -95,10 +94,13 @@
 | 问题 | 影响 | 状态 | 备注 |
 |------|------|------|------|
 | **Dashboard 登录 401** | 管理后台无法登录 | ✅ 已解决 | 本地/生产均可登录，旧 token 兼容 |
-| **Deno Deploy token 缺失** | 无法自动部署 | ⏳ 待配置 | 需设置 `DENO_DEPLOY_TOKEN` 环境变量 |
-| **本地测试 41 失败** | 单元测试基线 | 📝 已知 | DB/网络依赖导致，CI 环境一致，不阻塞发布 |
+| **Deno Deploy token "失效"误报** | 被误判为无法部署 | ✅ 已澄清 | token 有效。PAT 只能用 `deno deploy whoami --json` 校验；拿 `ddp_` 令牌去 curl `api.deno.com` 一律回 `invalidToken` |
+| **本地测试 40 失败** | 单元测试基线 | 📝 已知 | 全是 `DATABASE_URL not set` + 需要 `localhost:9999` 活服务；缺一键本地测试脚本与 CI |
 | **`FREE_PREFERENCE` 遗留** | 评分偏离原架构 | ✅ 已删除 | P0 过渡期产物，catalog 门控生效后已移除 |
-| **智力链归一化未完全生效** | 评分精度 | 🔧 进行中 | `route()` 中已计算 `_normIntelligence`，但 `calculateScore()` 仍用 `quality_score` 占位 |
+| **智力链归一化未完全生效** | 评分精度 | ✅ 已修复 | `calculateScore()` 已改读 `candidate._normIntelligence` |
+| **google 平台调用全 404** | Gemini 原生面 + `/v1` 都不可用 | 🔴 未结 | `HTTP 404 from google (empty upstream error body)`；疑 DB 中 google 行 `base_url` 已含 `/v1beta` 致路径双写，见 `notes/2026-10-22-gemini-boot-failure-and-empty-error-body.md` |
+| **`/v1` 空 200（200 + 0 body）** | 客户端拿到空响应 | ✅ 已修复 | 2026-10-22 `38490ce`：空响应改判 502 + `{error:{type,message}}` |
+| **`chat.ts` 4 处裸字符串错误体** | SPA 渲染成 "unknown error" | 🟡 待修 | 104/108/219/227 行 `c.json({ error: "字符串" })`，违反 `{error:{type,message}}` 约定 |
 
 ---
 

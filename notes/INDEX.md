@@ -2,6 +2,7 @@
 
 | 日期 | 主题 | 类型 | 文件 |
 |---|---|---|---|
+| 2026-10-22 | gemini.ts 重复顶层 const → warming failed；空错误体是 falsy → 原生路由崩 + `/v1` 空 200（部署历史才是裁判） | 踩坑/修复/验证 | [2026-10-22-gemini-boot-failure-and-empty-error-body.md](2026-10-22-gemini-boot-failure-and-empty-error-body.md) |
 | 2026-10-21 | Gemini 原生协议落地（复核：Hono catch-all 坑 + reasoning_content 合并） | 踩坑/修复/架构 | [2026-10-21-gemini-native.md](2026-10-21-gemini-native.md) |
 | 2026-10-21 | Decision Models (System One typed Q&A) 落地记录 | 架构/决策/实现 | [2026-10-21-decision-models.md](2026-10-21-decision-models.md) |
 | 2026-10-21 | routing-decision.ts 落地记录 | 架构/决策/实现 | [2026-10-21-routing-decision.md](2026-10-21-routing-decision.md) |
