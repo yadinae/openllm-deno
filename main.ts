@@ -266,7 +266,7 @@ const DIST = `${Deno.cwd()}/dist`;
 
 app.all("*", async (c) => {
   const path = c.req.path;
-  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health") return c.notFound();
+  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health" || path.startsWith("/settings")) return c.notFound();
 
   // Only GET/HEAD serve static content; everything else is a 404.
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.notFound();
