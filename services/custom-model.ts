@@ -400,6 +400,52 @@ function mapRowToModel(row: any): CustomModel {
   };
 }
 
+/** Load active custom models for a platform, with capabilities parsed for routing. */
+export async function loadCustomRoutableModels(platform: string) {
+  try {
+    await initDb();
+    const rows = await query`
+      SELECT id, display_name, provider, capabilities, pricing, config
+      FROM custom_models
+      WHERE provider = ${platform} AND status = 'active'
+    `;
+    const out = [];
+    for (const r of rows as any[]) {
+      let caps: any = {};
+      try { caps = JSON.parse(r.capabilities); } catch { caps = {}; }
+      let pricing: any = {};
+      try { pricing = JSON.parse(r.pricing); } catch {}
+      const free = pricing.input_per_1k === 0 && pricing.output_per_1k === 0;
+      
+      const intelRank = 500;
+      const sizeLabel = caps.max_context && caps.max_context >= 200_000 ? "Extra Large" :
+                        caps.max_context && caps.max_context >= 128_000 ? "Large" :
+                        caps.max_context && caps.max_context >= 32_000 ? "Medium" : "Small";
+      
+      out.push({
+        id: r.id,
+        provider: r.provider,
+        displayName: r.display_name,
+        free,
+        supportsVision: caps.vision === true,
+        supportsTools: caps.tools === true,
+        contextWindow: caps.max_context ?? 128000,
+        rpmLimit: null,
+        rpdLimit: null,
+        tpmLimit: null,
+        tpdLimit: null,
+        monthlyTokenBudget: "",
+        intelligenceRank: intelRank,
+        sizeLabel,
+      });
+    }
+    return out;
+  } catch (e) {
+    console.warn(`[custom-model] loadCustomRoutableModels(${platform}) failed:`, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 /** Database schema for custom models (to be added to db/pg.ts) */
 export const CUSTOM_MODELS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS custom_models (

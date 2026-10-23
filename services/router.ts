@@ -128,6 +128,22 @@ interface CachedMetrics {
   tpd_used: number; // tokens in the last 24h
 }
 
+/** Get pricing for a custom model from the custom_models table. Returns 0 for unknown. */
+async function getCustomPricing(modelId: string): Promise<number> {
+  try {
+    await initDb();
+    const rows = await query`
+      SELECT pricing FROM custom_models WHERE id = ${modelId}
+    `;
+    if (rows.length === 0) return 0;
+    let pricing: any = {};
+    try { pricing = JSON.parse((rows[0] as any).pricing); } catch {}
+    const inK = Number(pricing.input_per_1k ?? 0);
+    const outK = Number(pricing.output_per_1k ?? 0);
+    return (inK + outK) / 2;
+  } catch { return 0; }
+}
+
 const PROVIDER_MODEL_CACHE = new Map<string, { at: number; models: ModelInfo[] }>();
 const PROVIDER_MODEL_TTL_MS = 10 * 60 * 1000; // upstream /models lists change rarely
 
@@ -736,6 +752,68 @@ export class SmartRouter {
           metrics,
           quotaHeadroom: keyHeadroom,
         });
+      }
+
+      // ── Custom models (per-platform, gated by capabilities) ─────────────
+      // Only for virtual-model routing (auto/fusion). Custom models have their
+      // own `capabilities` JSON parsed into metrics-shape so they go through
+      // the same vision/tools/context-window gates as catalog rows.
+      if (virtualModel && adapter) {
+        try {
+          const { loadCustomRoutableModels } = await import("../services/custom-model.ts");
+          const customModels = await loadCustomRoutableModels(key.platform);
+          for (const cm of customModels) {
+            // Client profile scope
+            if (allowedModels && !allowedModels.includes(cm.id)) continue;
+            if (ctx.request.model && cm.id !== ctx.request.model) continue;
+
+            // Capability gates
+            if (requireVision && !cm.supportsVision) continue;
+            if (requireTools && !cm.supportsTools) continue;
+            if (!fitsContextWindowStrict(cm.contextWindow, gateTokens)) continue;
+
+            // Build a synthetic CachedMetrics for the custom model
+            const metrics: CachedMetrics = {
+              latency_p50: 1500,
+              cost_per_1k: cm.free ? 0 : await getCustomPricing(cm.id),
+              quality_score: cm.intelligenceRank / 1000,
+              success_rate: 0.95,
+              last_updated: Date.now(),
+              weighted_successes: 0,
+              weighted_failures: 0,
+              weighted_tok_per_sec: 0,
+              weighted_ttfb_ms: 0,
+              penalty: 0,
+              model_db_id: null,
+              supports_vision: cm.supportsVision ? 1 : 0,
+              supports_tools: cm.supportsTools ? 1 : 0,
+              context_window: cm.contextWindow,
+              monthly_token_budget: "",
+              rpm_limit: cm.rpmLimit,
+              rpd_limit: cm.rpdLimit,
+              tpm_limit: cm.tpmLimit,
+              tpd_limit: cm.tpdLimit,
+              fallback_priority: 0,
+              monthly_used_tokens: 0,
+              rpm_used: 0,
+              rpd_used: 0,
+              tpm_used: 0,
+              tpd_used: 0,
+            };
+
+            candidates.push({
+              provider: adapter,
+              model: cm.id,
+              key,
+              platform: key.platform,
+              free: cm.free,
+              metrics,
+              quotaHeadroom: 1,
+            });
+          }
+        } catch (e) {
+          console.warn(`[router] custom model loading for ${key.platform} failed:`, e instanceof Error ? e.message : e);
+        }
       }
     }
 
@@ -1619,6 +1697,70 @@ export interface RoutableModel {
    * stamped is_free, or the runtime pricing detector confirmed it). Unknown
    * pricing is deliberately NOT treated as free. */
   free: boolean;
+}
+
+/** Custom model with parsed capabilities for routing. */
+export interface CustomRoutableModel {
+  id: string;
+  provider: string;
+  displayName: string;
+  free: boolean;
+  supportsVision: boolean;
+  supportsTools: boolean;
+  contextWindow: number;
+  rpmLimit: number | null;
+  rpdLimit: number | null;
+  tpmLimit: number | null;
+  tpdLimit: number | null;
+  monthlyTokenBudget: string;
+  intelligenceRank: number;
+  sizeLabel: string;
+}
+
+/** Load active custom models for a platform, with capabilities parsed for routing. */
+export async function loadCustomRoutableModels(platform: string): Promise<CustomRoutableModel[]> {
+  try {
+    await initDb();
+    const rows = await query`
+      SELECT id, display_name, provider, capabilities, pricing, config
+      FROM custom_models
+      WHERE provider = ${platform} AND status = 'active'
+    `;
+    const out: CustomRoutableModel[] = [];
+    for (const r of rows as any[]) {
+      let caps: any = {};
+      try { caps = JSON.parse(r.capabilities); } catch { caps = {}; }
+      let pricing: any = {};
+      try { pricing = JSON.parse(r.pricing); } catch {}
+      const free = pricing.input_per_1k === 0 && pricing.output_per_1k === 0;
+      
+      const intelRank = 500;
+      const sizeLabel = caps.max_context && caps.max_context >= 200_000 ? "Extra Large" :
+                        caps.max_context && caps.max_context >= 128_000 ? "Large" :
+                        caps.max_context && caps.max_context >= 32_000 ? "Medium" : "Small";
+      
+      out.push({
+        id: r.id,
+        provider: r.provider,
+        displayName: r.display_name,
+        free,
+        supportsVision: caps.vision === true,
+        supportsTools: caps.tools === true,
+        contextWindow: caps.max_context ?? 128000,
+        rpmLimit: null,
+        rpdLimit: null,
+        tpmLimit: null,
+        tpdLimit: null,
+        monthlyTokenBudget: "",
+        intelligenceRank: intelRank,
+        sizeLabel,
+      });
+    }
+    return out;
+  } catch (e) {
+    console.warn(`[router] loadCustomRoutableModels(${platform}) failed:`, e instanceof Error ? e.message : e);
+    return [];
+  }
 }
 
 const ROUTABLE_CACHE = new Map<string, { at: number; models: RoutableModel[] }>();
