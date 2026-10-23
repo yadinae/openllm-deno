@@ -25,6 +25,7 @@ import anthropicRouter from "./routes/anthropic.ts";
 import responsesRouter from "./routes/responses.ts";
 import moderationsRouter from "./routes/moderations.ts";
 import embeddingsRouter from "./routes/embeddings.ts";
+import settingsRouter from "./routes/settings.ts";
 import mediaRouter from "./routes/media.ts";
 import rerankRouter from "./routes/rerank.ts";
 import ollamaRouter from "./routes/ollama.ts";
@@ -205,6 +206,9 @@ app.route("/v1", rerankRouter);         // /v1/rerank
 app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api/chat, etc.
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
+
+// Settings (operator configuration endpoints)
+app.route("/settings", settingsRouter);   // /settings/anthropic-map, /settings/gemini-map, etc.
 
 // Gemini native protocol (mounted at /v1beta for /v1beta/ paths)
 app.route("/v1beta", geminiRouter);             // /v1beta/models/...
