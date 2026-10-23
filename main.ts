@@ -264,7 +264,7 @@ function safeHostname(): string {
   }
 }
 
-app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString(), hostname: safeHostname(), storage: "Prisma Postgres" }));
+app.get("/health", (c) => c.json({ ok: true, ts: new Date().toISOString(), hostname: safeHostname(), storage: "Prisma Postgres", _deployed: "2026-10-23-v2" }));
 
 // ── Liveness / readiness (Kubernetes-style probes added during P2) ─────────
 // /livez  — process is up and able to serve; no DB round-trip. If this fails,

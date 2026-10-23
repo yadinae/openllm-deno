@@ -120,7 +120,7 @@ try {
     for (const f of staged.sort()) console.log("  ", f);
     console.log("[deploy] --dry-run: not deploying.");
   } else {
-    const args = ["deploy", tmp, "--org", org, "--app", app, "--non-interactive"];
+    const args = ["deploy", tmp, "--non-interactive"];
     if (prod) args.push("--prod");
     if (token) args.push("--token", token);
     console.log(`[deploy] deno ${args.map((a) => (a === token ? "***" : a)).join(" ")}`);
