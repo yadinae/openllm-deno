@@ -503,6 +503,14 @@ CREATE TABLE IF NOT EXISTS custom_models (
 CREATE INDEX IF NOT EXISTS idx_custom_models_provider ON custom_models(provider);
 CREATE INDEX IF NOT EXISTS idx_custom_models_status ON custom_models(status);
 
+CREATE TABLE IF NOT EXISTS custom_model_monthly_usage (
+  model_id TEXT NOT NULL,
+  month TEXT NOT NULL,        -- 'YYYY-MM'
+  requests INTEGER NOT NULL DEFAULT 0,
+  tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (model_id, month)
+);
+
 CREATE TABLE IF NOT EXISTS model_tombstones (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   model_id TEXT NOT NULL,

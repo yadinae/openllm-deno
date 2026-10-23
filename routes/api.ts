@@ -8,6 +8,7 @@ import { getRoutingScores } from "../services/router.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 import { getQuotaForecast } from "../services/quota-forecast.ts";
+import { getCustomModelBudgetForecasts } from "../services/custom-model-budget.ts";
 import { providerRegistry } from "../providers/index.ts";
 import type { MCPCallToolResult, MCPReadResourceResult } from "../services/mcp.ts";
 
@@ -707,7 +708,8 @@ api.get("/fallback/token-usage", async (c) => {
 
 api.get("/fallback/quota-forecast", async (c) => {
   const forecast = await getQuotaForecast();
-  return c.json({ forecast, generatedAt: new Date().toISOString() });
+  const customModelBudgets = await getCustomModelBudgetForecasts();
+  return c.json({ forecast, customModelBudgets, generatedAt: new Date().toISOString() });
 });
 
 /** POST /fallback/cooldown-probe/trigger — manual probe pass for the dashboard. */

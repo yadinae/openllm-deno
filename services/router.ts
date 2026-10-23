@@ -18,6 +18,12 @@ import type {
 import { providerRegistry, getAdapterForPlatform } from "../providers/index.ts";
 import { query, initDb, getSetting, saveSetting } from "../db/pg.ts";
 import {
+  checkCustomModelBudget,
+  reserveCustomModelBudget,
+  settleCustomModelUsage,
+  type CustomModelBudgetVerdict,
+} from "./custom-model-budget.ts";
+import {
   // Types
   RoutingWeights,
   RoutingStrategy,
@@ -764,13 +770,19 @@ export class SmartRouter {
           const customModels = await loadCustomRoutableModels(key.platform);
           for (const cm of customModels) {
             // Client profile scope
-            if (allowedModels && !allowedModels.includes(cm.id)) continue;
+                        if (allowedModels && !allowedModels.includes(cm.id)) continue;
             if (ctx.request.model && cm.id !== ctx.request.model) continue;
 
-            // Capability gates
-            if (requireVision && !cm.supportsVision) continue;
-            if (requireTools && !cm.supportsTools) continue;
-            if (!fitsContextWindowStrict(cm.contextWindow, gateTokens)) continue;
+                      // Estimate tokens for capability gates and budget check
+            const gateTokens = Math.max(
+              estimateRequestTokens(ctx.request),
+              ctx.request.max_tokens ?? 0,
+            ) + routingReserveTokens(ctx.request.max_tokens);
+
+                      // Capability gates
+                      if (requireVision && !cm.supportsVision) continue;
+                      if (requireTools && !cm.supportsTools) continue;
+                      if (!fitsContextWindowStrict(cm.contextWindow, gateTokens)) continue;
 
             // Build a synthetic CachedMetrics for the custom model
             const metrics: CachedMetrics = {
@@ -788,7 +800,7 @@ export class SmartRouter {
               supports_vision: cm.supportsVision ? 1 : 0,
               supports_tools: cm.supportsTools ? 1 : 0,
               context_window: cm.contextWindow,
-              monthly_token_budget: "",
+              monthly_token_budget: cm.monthlyTokenBudget,
               rpm_limit: cm.rpmLimit,
               rpd_limit: cm.rpdLimit,
               tpm_limit: cm.tpmLimit,
@@ -801,6 +813,13 @@ export class SmartRouter {
               tpd_used: 0,
             };
 
+            // Check custom model monthly budget (gateTokens already computed above)
+            const budgetCheck = await checkCustomModelBudget(cm.id, gateTokens);
+            if (!budgetCheck.allowed) {
+              console.log(`[router] custom model ${cm.id} budget exceeded: ${budgetCheck.budgetUsed}/${budgetCheck.budgetLimit}`);
+              continue;
+            }
+
             candidates.push({
               provider: adapter,
               model: cm.id,
@@ -809,6 +828,7 @@ export class SmartRouter {
               free: cm.free,
               metrics,
               quotaHeadroom: 1,
+              customModelBudget: budgetCheck, // For later reserve/settle
             });
           }
         } catch (e) {
@@ -1326,6 +1346,8 @@ interface Candidate {
   metrics: CachedMetrics;
   /** Quota headroom 0..1 from provider-quota, 1 = unknown/no data. */
   quotaHeadroom: number;
+  /** Custom model monthly budget verdict (for reserve/settle). */
+  customModelBudget?: CustomModelBudgetVerdict;
 }
 
 interface ScoredCandidate extends Candidate {
@@ -1522,6 +1544,28 @@ export async function executeWithFallback(
     };
   }
 
+  // Custom model monthly budget (if the routed model is a custom model)
+  const isCustomModel = decision.model.startsWith("custom/");
+  let customBudget: Awaited<ReturnType<typeof reserveCustomModelBudget>> | null = null;
+  if (isCustomModel) {
+    customBudget = await reserveCustomModelBudget(decision.model, estimatedTokens);
+    if (!customBudget.allowed) {
+      releaseBudget();
+      return {
+        error: `custom_model_monthly_token_budget`,
+        status: 429,
+        latency_ms: 0,
+        provider_metadata: {
+          retry_after_sec: customBudget.retryAfterSec,
+          reason: "custom_model_monthly_token_budget",
+          exhausted_chain: false,
+          attempts: [],
+        },
+      };
+    }
+  }
+  const releaseCustomBudget = () => customBudget?.release?.();
+
   // Try primary — the router chose decision.model, so the caller's virtual
   // model name ("auto") must not leak to the provider.
   const primaryKey = `${decision.provider.id}/${decision.model}/${decision.key.id}`;
@@ -1551,11 +1595,19 @@ export async function executeWithFallback(
       };
     }
     releaseBudget();
+    releaseCustomBudget();
     await settleMonthlyUsage(
       decision.key.db_id,
       primaryResult.response?.usage?.prompt_tokens ?? estimatedTokens,
       primaryResult.response?.usage?.completion_tokens ?? 0,
     );
+    if (isCustomModel) {
+      await settleCustomModelUsage(
+        decision.model,
+        primaryResult.response?.usage?.prompt_tokens ?? estimatedTokens,
+        primaryResult.response?.usage?.completion_tokens ?? 0,
+      );
+    }
     return primaryResult;
   }
 
@@ -1571,6 +1623,16 @@ export async function executeWithFallback(
     // Get the key for this fallback
     const fallbackKeyObj = await getKeyById(fallback.key_id);
     if (!fallbackKeyObj) continue;
+
+    const isFallbackCustom = fallback.model.startsWith("custom/");
+    let fallbackCustomBudget: Awaited<ReturnType<typeof reserveCustomModelBudget>> | null = null;
+    if (isFallbackCustom) {
+      fallbackCustomBudget = await reserveCustomModelBudget(fallback.model, estimatedTokens);
+      if (!fallbackCustomBudget.allowed) {
+        console.warn(`[router] fallback custom model ${fallback.model} budget exceeded`);
+        continue;
+      }
+    }
 
     const fallbackRequest = { ...request, model: fallback.model };
     const result = await adapter.chat(fallbackRequest, fallbackKeyObj);
@@ -1601,11 +1663,21 @@ export async function executeWithFallback(
         };
       }
       releaseBudget();
+      if (isFallbackCustom) {
+        fallbackCustomBudget?.release?.();
+      }
       await settleMonthlyUsage(
         fallbackKeyObj.db_id,
         result.response?.usage?.prompt_tokens ?? estimatedTokens,
         result.response?.usage?.completion_tokens ?? 0,
       );
+      if (isFallbackCustom) {
+        await settleCustomModelUsage(
+          fallback.model,
+          result.response?.usage?.prompt_tokens ?? estimatedTokens,
+          result.response?.usage?.completion_tokens ?? 0,
+        );
+      }
       return result;
     }
   }
@@ -1626,6 +1698,7 @@ export async function executeWithFallback(
     },
   };
   releaseBudget();
+  releaseCustomBudget();
   return failedResult;
 }
 
