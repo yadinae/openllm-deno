@@ -468,29 +468,23 @@ export class SmartRouter {
     const keyCounts = new Map<string, number>();
     for (const c of candidates) keyCounts.set(c.platform, (keyCounts.get(c.platform) ?? 0) + 1);
 
-    // 2. Score each candidate using the 3-axis bandit
+    // 2) Score each candidate using the 3-axis bandit. Compute the
+    // chain-wide intelligence normalization FIRST (matches FreeLLMAPI
+    // scoreChainEntry, which receives intelMin/intelMax up front) so scoring
+    // happens in a single pass, not two.
+    const composites = candidates.map((c) => (c.metrics as any).intelligence_composite ?? intelligenceComposite("Medium", 500));
+    const intelMin = composites.length ? Math.min(...composites) : 0;
+    const intelMax = composites.length ? Math.max(...composites) : 1;
+    for (const c of candidates) {
+      const composite = (c.metrics as any).intelligence_composite ?? intelligenceComposite("Medium", 500);
+      (c as any)._normIntelligence = intelMax > intelMin ? (composite - intelMin) / (intelMax - intelMin) : 1;
+    }
+
     const scored = await Promise.all(
       candidates.map(async (c) => ({
         ...c,
         score: await this.calculateScore(c, ctx, resolvedStrategy, { keyCounts }),
       }))
-    );
-
-    // 3. Intelligence chain normalization: min-max normalize intelligence_composite within the chain
-    // so that rank edits near the top of the range are visible on the axis (per FreeLLMAPI design).
-    const composites = scored.map((c) => (c.metrics as any).intelligence_composite ?? intelligenceComposite("Medium", 500));
-    const intelMin = composites.length ? Math.min(...composites) : 0;
-    const intelMax = composites.length ? Math.max(...composites) : 1;
-    for (const c of scored) {
-      const composite = (c.metrics as any).intelligence_composite ?? intelligenceComposite("Medium", 500);
-      const normIntel = intelMax > intelMin ? (composite - intelMin) / (intelMax - intelMin) : 1;
-      // Replace the placeholder intelligence score with the normalized value
-      (c as any)._normIntelligence = normIntel;
-    }
-    // Normalization changed the intelligence axis — rescore once so the final
-    // ordering reflects it (the first pass was needed to see the chain).
-    const rescored = await Promise.all(
-      scored.map(async (c) => ({ ...c, score: await this.calculateScore(c, ctx, resolvedStrategy, { keyCounts }) }))
     );
 
     // 4. Apply reliability floor: drop chronically-failing models before final
@@ -499,15 +493,15 @@ export class SmartRouter {
     // would empty the chain entirely, the filter is skipped — better a
     // possibly-flaky model than no model at all.
     const minFloor = await this.getMinReliabilityFloor();
-    let ordered = rescored;
+    let ordered = scored;
     if (minFloor !== undefined) {
       const exploreMinSamples = await this.getExploreMinSamples();
-      const kept = rescored.filter((c) => {
+      const kept = scored.filter((c) => {
         const samples = c.metrics.weighted_successes + c.metrics.weighted_failures;
         return samples < exploreMinSamples || this.expectedReliabilityFor(c) >= minFloor;
       });
-      if (kept.length > 0 && kept.length !== rescored.length) {
-        console.log(`[router] reliability floor ${minFloor} dropped ${rescored.length - kept.length} candidates`);
+      if (kept.length > 0 && kept.length !== scored.length) {
+        console.log(`[router] reliability floor ${minFloor} dropped ${scored.length - kept.length} candidates`);
         ordered = kept;
       }
     }
