@@ -8,7 +8,7 @@ import { search, listSearchEngines, getSearchEngine, getEnginesByCapability, est
 import { mcpServer, MCPClient, type MCPTool, type MCPResource } from "../services/mcp.ts";
 import { registerCustomModel, getCustomModel, listCustomModels, updateCustomModel, deprecateCustomModel, retireCustomModel, restoreCustomModel, syncCustomModel, type CustomModel, type ModelRegistration } from "../services/custom-model.ts";
 import { clientProfileService, authClientService, urlTokenService, type ClientProfile, type AuthClient, type URLToken } from "../services/client-profiles.ts";
-import { createEmbeddings, listEmbeddingModels } from "../services/embeddings.ts";
+import { runEmbeddings, listEmbeddingModels, estimateTokens } from "../services/embeddings.ts";
 import { generateMedia, type MediaGenerationRequest } from "../services/media.ts";
 
 const initializeRegistry = async () => {
@@ -557,16 +557,15 @@ Deno.test("URLToken: Max uses exceeded returns null", async () => {
 // EMBEDDINGS TESTS (no DB required)
 // ════════════════════════════════════════════════════════════════════════════
 
-Deno.test("Embeddings: listEmbeddingModels returns expected providers", () => {
-  const models = listEmbeddingModels();
+Deno.test("Embeddings: listEmbeddingModels returns expected providers", async () => {
+  const models = await listEmbeddingModels();
   assertExists(models);
-  assert(models.length >= 3); // openai, cohere, voyage/huggingface at minimum
-  
-  const providers = [...new Set(models.map(m => m.provider))];
+  assert(models.length >= 3); // openai, google, cohere at minimum
+
+  const providers = [...new Set(models.map((m: any) => m.platform))];
   assert(providers.includes("openai"));
   assert(providers.includes("cohere"));
-  // BGE is under huggingface provider
-  assert(providers.includes("huggingface") || providers.includes("voyage"));
+  assert(providers.includes("google"));
 });
 
 // ════════════════════════════════════════════════════════════════════════════

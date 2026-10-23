@@ -10,6 +10,7 @@ import { getAdapterForPlatform, executeChat } from "../providers/index.ts";
 import type { ProviderResult, ApiKey } from "../providers/types.ts";
 import { requestLogger, generateRequestId } from "../services/request-log.ts";
 import { smartRouter, executeWithFallback } from "../services/router.ts";
+import { resolveAnthropicModel } from "../services/anthropic-map.ts";
 
 const anthropicRouter = new Hono();
 
@@ -149,6 +150,14 @@ anthropicRouter.post("/messages", async (c) => {
     tool_choice: body.tool_choice,
     user: body.metadata?.user_id,
   };
+
+  // Resolve Anthropic family aliases to actual catalog models
+  const resolved = await resolveAnthropicModel(openAIReq.model);
+  if (resolved.pinned && resolved.modelId) {
+    openAIReq.model = resolved.modelId;
+  }
+  // Note: tierDbIds could be used to restrict the fallback chain to a specific tier
+  // For now, we pass the pinned model and let the router handle fallback
 
   try {
     const result = await dispatchChat(openAIReq, c.req.header("x-session-id") ?? undefined);

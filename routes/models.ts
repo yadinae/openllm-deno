@@ -5,6 +5,7 @@
 import type { Context } from "hono";
 import type { DbData } from "../db/mod.ts";
 import { getModels as getDiscoveredModels } from "../db/pg.ts";
+import { claudeFamilyDiscoveryEntries } from "../services/anthropic-map.ts";
 
 interface OpenAIModel {
   id: string;
@@ -71,6 +72,22 @@ export async function getModels(c: Context) {
     }
   } catch {
     // Postgres unavailable — catalog-only list is still valid
+  }
+
+  // Add Claude family discovery entries (for Anthropic clients)
+  for (const entry of claudeFamilyDiscoveryEntries()) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    data.push({
+      id: entry.id,
+      object: "model",
+      created: 0,
+      owned_by: "anthropic-map",
+      context_window: 200000,
+      capabilities: ["text"],
+      supports_reasoning: false,
+      free: true,
+    });
   }
 
   if (data.length === 0) {

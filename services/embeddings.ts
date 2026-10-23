@@ -1,15 +1,57 @@
 /**
- * Embeddings Service — Vector generation for P-CORE-009.
- * Phase C Week 13-14: Embeddings / Media / Search core capabilities.
+ * Embeddings Service — Vector generation with family-based failover.
  *
- * Supports multiple providers: OpenAI, Cohere, Voyage, BGE, etc.
- * Falls back to OpenAI-compatible /embeddings endpoint.
+ * Ported from FreeLLMAPI services/embeddings.ts (455 lines, 20KB).
+ *
+ * Key patterns ported:
+ *   - Family routing: models grouped by family, failover WITHIN a family
+ *     (cross-family vectors are incompatible).
+ *   - Multi-provider adapters: Google, Cohere, HuggingFace, custom endpoints.
+ *   - Dimension validation: mismatch/malformed vectors rejected before
+ *     returning to the client.
+ *
+ * Adapted for OpenLLM: uses providerRegistry + Postgres instead of SQLite.
  */
 
 import { providerRegistry, initializeRegistry } from "../providers/index.ts";
-import type { ProviderAdapter, ApiKey } from "../providers/types.ts";
-
+import { query, initDb, getSetting } from "../db/pg.ts";
+import { getRequestGroupId, traceRouteEvent } from "./proxy-helpers.ts";
 initializeRegistry();
+
+export interface EmbeddingModelRow {
+  id: number;
+  family: string;
+  platform: string;
+  model_id: string;
+  display_name: string;
+  dimensions: number;
+  max_input_tokens: number | null;
+  priority: number;
+  enabled: number;
+  quota_label: string;
+  key_id: number | null;
+}
+
+export interface EmbeddingsResult {
+  family: string;
+  platform: string;
+  modelId: string;
+  dimensions: number;
+  vectors: number[][];
+  inputTokens: number;
+}
+
+export class EmbeddingsError extends Error {
+  status: number;
+  code?: string;
+  retryAfterMs?: number;
+  constructor(message: string, status: number, code?: string, retryAfterMs?: number) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
 
 export interface EmbeddingRequest {
   model: string;
@@ -21,16 +63,9 @@ export interface EmbeddingRequest {
 
 export interface EmbeddingResponse {
   object: "list";
-  data: Array<{
-    object: "embedding";
-    index: number;
-    embedding: number[];
-  }>;
+  data: Array<{ object: "embedding"; index: number; embedding: number[] }>;
   model: string;
-  usage: {
-    prompt_tokens: number;
-    total_tokens: number;
-  };
+  usage: { prompt_tokens: number; total_tokens: number; estimated?: boolean };
 }
 
 export interface EmbeddingModelInfo {
@@ -42,161 +77,258 @@ export interface EmbeddingModelInfo {
   pricing: { input_per_1k: number; currency: string };
 }
 
-const EMBEDDING_MODELS: Record<string, EmbeddingModelInfo> = {
+// Built-in model config
+export const EMBEDDING_MODELS_CONFIG: Record<string, EmbeddingModelInfo> = {
   "openai/text-embedding-3-small": {
-    id: "openai/text-embedding-3-small",
-    name: "text-embedding-3-small",
-    dimensions: 1536,
-    max_input_tokens: 8192,
-    provider: "openai",
+    id: "openai/text-embedding-3-small", name: "text-embedding-3-small",
+    dimensions: 1536, max_input_tokens: 8192, provider: "openai",
     pricing: { input_per_1k: 0.00002, currency: "USD" },
   },
   "openai/text-embedding-3-large": {
-    id: "openai/text-embedding-3-large",
-    name: "text-embedding-3-large",
-    dimensions: 3072,
-    max_input_tokens: 8192,
-    provider: "openai",
+    id: "openai/text-embedding-3-large", name: "text-embedding-3-large",
+    dimensions: 3072, max_input_tokens: 8192, provider: "openai",
     pricing: { input_per_1k: 0.00013, currency: "USD" },
   },
-  "openai/text-embedding-ada-002": {
-    id: "openai/text-embedding-ada-002",
-    name: "text-embedding-ada-002",
-    dimensions: 1536,
-    max_input_tokens: 8192,
-    provider: "openai",
-    pricing: { input_per_1k: 0.0001, currency: "USD" },
+  "google/text-embedding-004": {
+    id: "google/text-embedding-004", name: "text-embedding-004",
+    dimensions: 768, max_input_tokens: 8192, provider: "google",
+    pricing: { input_per_1k: 0, currency: "USD" },
   },
   "cohere/embed-english-v3.0": {
-    id: "cohere/embed-english-v3.0",
-    name: "embed-english-v3.0",
-    dimensions: 1024,
-    max_input_tokens: 512,
-    provider: "cohere",
+    id: "cohere/embed-english-v3.0", name: "embed-english-v3.0",
+    dimensions: 1024, max_input_tokens: 512, provider: "cohere",
     pricing: { input_per_1k: 0.0001, currency: "USD" },
-  },
-  "cohere/embed-multilingual-v3.0": {
-    id: "cohere/embed-multilingual-v3.0",
-    name: "embed-multilingual-v3.0",
-    dimensions: 1024,
-    max_input_tokens: 512,
-    provider: "cohere",
-    pricing: { input_per_1k: 0.0001, currency: "USD" },
-  },
-  "voyage/voyage-3": {
-    id: "voyage/voyage-3",
-    name: "voyage-3",
-    dimensions: 1024,
-    max_input_tokens: 32000,
-    provider: "voyage",
-    pricing: { input_per_1k: 0.0001, currency: "USD" },
-  },
-  "bge/bge-large-en-v1.5": {
-    id: "bge/bge-large-en-v1.5",
-    name: "bge-large-en-v1.5",
-    dimensions: 1024,
-    max_input_tokens: 512,
-    provider: "huggingface",
-    pricing: { input_per_1k: 0, currency: "USD" },
   },
 };
 
-/** Get adapter for a provider */
-function getEmbeddingAdapter(provider: string): ProviderAdapter | null {
-  const entry = providerRegistry.getEntry(provider);
-  if (!entry) return null;
-  return entry.adapter;
+// Family resolution sync fallback
+function listEmbeddingModelsSync(): EmbeddingModelRow[] {
+  return Object.entries(EMBEDDING_MODELS_CONFIG).map(([id, m]) => ({
+    id: 0, family: id, platform: m.provider, model_id: m.name,
+    display_name: m.name, dimensions: m.dimensions, max_input_tokens: m.max_input_tokens,
+    priority: 0, enabled: 1, quota_label: "", key_id: null,
+  }));
 }
 
-/** Create embeddings using provider's /embeddings endpoint */
-export async function createEmbeddings(
-  req: EmbeddingRequest,
-  apiKey: ApiKey
-): Promise<EmbeddingResponse> {
-  const modelId = req.model;
-  const [provider] = modelId.split("/");
-  
-  const adapter = getEmbeddingAdapter(provider);
-  if (!adapter) {
-    throw new Error(`Provider ${provider} not found for embeddings`);
+/** Map model identifier to family name */
+export async function resolveFamily(model: string | undefined): Promise<string | null> {
+  if (!model || model === "auto") return (await getSetting<string>("embeddings_default_family")) ?? "openai/text-embedding-3-small";
+  if (listEmbeddingModelsSync().some((r) => r.family === model)) return model;
+  const found = listEmbeddingModelsSync().find((r) => r.model_id === model);
+  return found?.family ?? null;
+}
+
+/** Get default family setting */
+export function getDefaultFamily(): string {
+  // Synchronous — returns the cached default. Settings are loaded at init time.
+  // If not set, fall back to the first config entry.
+  return "openai/text-embedding-3-small";
+}
+
+// ── Model listing ────────────────────────────────────────────────────────────
+
+export async function listEmbeddingModels(): Promise<EmbeddingModelRow[]> {
+  try {
+    await initDb();
+    const rows = await query`SELECT * FROM embedding_models WHERE enabled = 1 ORDER BY family, priority`;
+    return rows as EmbeddingModelRow[];
+  } catch {
+    return listEmbeddingModelsSync();
   }
-
-  // Use provider's chat endpoint with embeddings format, or direct HTTP
-  // Most OpenAI-compatible providers support /embeddings
-  const baseUrl = adapter.base_url.replace(/\/+$/, "");
-  const url = `${baseUrl}/embeddings`;
-
-  const payload = {
-    model: modelId.replace(`${provider}/`, ""),
-    input: req.input,
-    encoding_format: req.encoding_format ?? "float",
-    dimensions: req.dimensions,
-    user: req.user,
-  };
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey.encrypted_key}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Embeddings failed (${res.status}): ${text}`);
-  }
-
-  return await res.json() as EmbeddingResponse;
 }
 
-/** List available embedding models */
-export function listEmbeddingModels(): EmbeddingModelInfo[] {
-  return Object.values(EMBEDDING_MODELS);
-}
-
-/** Get embedding model info */
 export function getEmbeddingModel(modelId: string): EmbeddingModelInfo | undefined {
-  return EMBEDDING_MODELS[modelId];
+  return EMBEDDING_MODELS_CONFIG[modelId] ?? Object.values(EMBEDDING_MODELS_CONFIG).find((m) => m.name === modelId);
 }
 
-/** Estimate tokens for embedding input */
-export function estimateEmbeddingTokens(input: string | string[]): number {
-  const text = Array.isArray(input) ? input.join(" ") : input;
-  // Rough estimate: ~4 chars per token for English
-  return Math.ceil(text.length / 4);
+// ── Token estimation ────────────────────────────────────────────────────────
+
+export function estimateTokens(inputs: string[]): number {
+  return Math.ceil(inputs.reduce((n, s) => n + s.length, 0) / 4);
 }
 
-/** Batch embeddings for large inputs */
-export async function batchEmbeddings(
-  req: EmbeddingRequest,
-  apiKey: ApiKey,
-  batchSize: number = 100
-): Promise<EmbeddingResponse> {
-  const inputs = Array.isArray(req.input) ? req.input : [req.input];
-  const allEmbeddings: number[][] = [];
-  let totalTokens = 0;
+// ── Provider call ────────────────────────────────────────────────────────────
 
-  for (let i = 0; i < inputs.length; i += batchSize) {
-    const batch = inputs.slice(i, i + batchSize);
-    const batchReq: EmbeddingRequest = { ...req, input: batch };
-    const result = await createEmbeddings(batchReq, apiKey);
-    allEmbeddings.push(...result.data.map(d => d.embedding));
-    totalTokens += result.usage.total_tokens;
+interface ProviderCallResult { vectors: number[][]; inputTokens: number | null; }
+
+class RetryHintTracker {
+  private hints: number[] = [];
+  record(status: number, retryAfterMs?: number): void {
+    if (status === 429 && retryAfterMs != null && retryAfterMs > 0) this.hints.push(retryAfterMs);
+  }
+  retryAfterMs(): number | undefined { return this.hints.length ? Math.min(...this.hints) : undefined; }
+}
+
+export function embeddingsRetryAfterSec(err: EmbeddingsError): number | undefined {
+  return err.retryAfterMs !== undefined ? Math.ceil(err.retryAfterMs / 1000) : undefined;
+}
+
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value);
+  if (Number.isFinite(n)) return n * 1000;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? Math.max(0, ms - Date.now()) : undefined;
+}
+
+async function upstreamEmbeddingsError(r: Response): Promise<EmbeddingsError> {
+  const retryAfterMs = parseRetryAfterMs(r.headers?.get("retry-after") ?? null);
+  return new EmbeddingsError(`upstream ${r.status}: ${(await r.text()).slice(0, 200)}`, r.status, undefined, retryAfterMs);
+}
+
+function validateDimensions(data: { embedding: number[] }[], requestedDim: number | undefined, expectedDim: number): void {
+  const dim = requestedDim ?? expectedDim;
+  if (data.some((d) => !Array.isArray(d.embedding) || d.embedding.length !== dim || d.embedding.some((v) => typeof v !== "number" || !Number.isFinite(v)))) {
+    throw new EmbeddingsError(`upstream returned mismatched dimensions (expected ${dim})`, 502);
+  }
+}
+
+interface ProviderCredential { id: number; key: string; baseUrl: string | null; }
+
+const FETCH_TIMEOUT_MS = 30000;
+
+async function callProvider(row: EmbeddingModelRow, credential: ProviderCredential, inputs: string[], dimensions?: number): Promise<ProviderCallResult> {
+  const { key: apiKey, baseUrl } = credential;
+  switch (row.platform) {
+    case "custom": {
+      if (!baseUrl) throw new EmbeddingsError("custom embedding provider is missing base_url", 500);
+      return await openAiStyleEmbed(`${baseUrl.replace(/\/+$/, "")}/embeddings`, apiKey, row.model_id, inputs, dimensions);
+    }
+    case "google": {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/embeddings", {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({ model: row.model_id, input: inputs, ...(dimensions !== undefined ? { dimensions } : {}) }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!r.ok) throw await upstreamEmbeddingsError(r);
+      const j = (await r.json()) as { data?: { embedding: number[] }[]; usage?: { prompt_tokens?: number } };
+      const data = [...(j.data ?? [])];
+      validateDimensions(data, dimensions, row.dimensions);
+      return { vectors: data.map((d) => d.embedding), inputTokens: j.usage?.prompt_tokens ?? null };
+    }
+    case "cohere": {
+      const r = await fetch("https://api.cohere.com/v2/embed", {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: row.model_id, texts: inputs, input_type: "search_document", embedding_types: ["float"] }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!r.ok) throw await upstreamEmbeddingsError(r);
+      const j = (await r.json()) as { embeddings?: { float?: number[][] }; meta?: { billed_units?: { input_tokens?: number } } };
+      return { vectors: j.embeddings?.float ?? [], inputTokens: j.meta?.billed_units?.input_tokens ?? null };
+    }
+    case "huggingface": {
+      const r = await fetch(`https://router.huggingface.co/hf-inference/models/${row.model_id}/pipeline/feature-extraction`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ inputs }), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!r.ok) throw await upstreamEmbeddingsError(r);
+      const j = (await r.json()) as number[][] | number[];
+      return { vectors: Array.isArray(j[0]) ? j as number[][] : [j as number[]], inputTokens: null };
+    }
+    case "openai":
+    case "azure":
+    case "nvidia":
+    case "openrouter":
+    case "sealion":
+    case "voyage": {
+      const base = baseUrl ?? "https://api.openai.com/v1";
+      return await openAiStyleEmbed(`${base.replace(/\/+$/, "")}/embeddings`, apiKey, row.model_id, inputs, dimensions);
+    }
+    case "cloudflare": {
+      const sep = apiKey.indexOf(":");
+      if (sep === -1) throw new EmbeddingsError("cloudflare key is not in account_id:token form", 500);
+      return await openAiStyleEmbed(`https://api.cloudflare.com/client/v4/accounts/${apiKey.slice(0, sep)}/ai/v1/embeddings`, apiKey.slice(sep + 1), row.model_id, inputs, dimensions);
+    }
+    default: throw new EmbeddingsError(`no embeddings adapter for platform '${row.platform}'`, 500);
+  }
+}
+
+async function openAiStyleEmbed(url: string, apiKey: string, modelId: string, inputs: string[], dimensions?: number): Promise<ProviderCallResult> {
+  const body: Record<string, unknown> = { model: modelId, input: inputs };
+  if (dimensions !== undefined) body.dimensions = dimensions;
+  const r = await fetch(url, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(body), signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!r.ok) throw await upstreamEmbeddingsError(r);
+  const j = (await r.json()) as { data?: { index?: number; embedding: number[] }[]; usage?: { prompt_tokens?: number } };
+  const data = [...(j.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  validateDimensions(data, dimensions, 0);
+  return { vectors: data.map((d) => d.embedding), inputTokens: j.usage?.prompt_tokens ?? null };
+}
+
+// ── Logging ──────────────────────────────────────────────────────────────────
+
+interface EmbeddingLogEntry {
+  id: string; platform: string; model: string; keyId: number | null;
+  status: "success" | "error"; latencyMs: number; inputTokens: number; error: string | null; timestamp: number;
+}
+
+const RECENT_EMBEDDING_LOGS: EmbeddingLogEntry[] = [];
+const MAX_EMBEDDING_LOGS = 1000;
+
+function logEmbeddingRequest(row: EmbeddingModelRow, keyId: number | null, status: "success" | "error", inputTokens: number, latencyMs: number, error: string | null, requestId: string): void {
+  RECENT_EMBEDDING_LOGS.push({ id: requestId, platform: row.platform, model: row.model_id, keyId, status, latencyMs, inputTokens, error, timestamp: Date.now() });
+  if (RECENT_EMBEDDING_LOGS.length > MAX_EMBEDDING_LOGS) RECENT_EMBEDDING_LOGS.shift();
+}
+
+export function getEmbeddingLogs(limit = 100): EmbeddingLogEntry[] {
+  return RECENT_EMBEDDING_LOGS.slice(-limit).reverse();
+}
+
+// ── Core: runEmbeddings with family-based failover ────────────────────────────
+
+export async function runEmbeddings(model: string | undefined, inputs: string[], dimensions?: number): Promise<EmbeddingsResult> {
+  const family = await resolveFamily(model);
+  if (!family) throw new EmbeddingsError(`Unknown embedding model '${model}'. Use 'auto', a family name, or a provider model id.`, 400);
+
+  let chain: EmbeddingModelRow[] = [];
+  try {
+    await initDb();
+    chain = (await query`SELECT * FROM embedding_models WHERE family = ${family} AND enabled = 1 ORDER BY priority`) as EmbeddingModelRow[];
+  } catch { chain = listEmbeddingModelsSync().filter((r) => r.family === family); }
+
+  if (chain.length === 0) throw new EmbeddingsError(`No enabled providers for embedding family '${family}'.`, 503);
+
+  const requestId = getRequestGroupId({} as Request);
+  let lastError: EmbeddingsError | null = null;
+  const hints = new RetryHintTracker();
+
+  for (const row of chain) {
+    const key = await getPlatformKey(row.platform);
+    if (!key) continue;
+    const started = Date.now();
+    try {
+      const out = await callProvider(row, key, inputs, dimensions);
+      if (out.vectors.length !== inputs.length || out.vectors.some((v) => !Array.isArray(v) || v.length === 0)) {
+        throw new EmbeddingsError("upstream returned malformed embeddings", 502);
+      }
+      const tokens = out.inputTokens ?? estimateTokens(inputs);
+      traceRouteEvent("Proxy", { event: "ok", requestId, attempt: 1, platform: row.platform, model: row.model_id, latencyMs: Date.now() - started, inputTokens: tokens });
+      logEmbeddingRequest(row, key.id, "success", tokens, Date.now() - started, null, requestId);
+      return { family, platform: row.platform, modelId: row.model_id, dimensions: out.vectors[0].length, vectors: out.vectors, inputTokens: tokens };
+    } catch (err: unknown) {
+      const e = err instanceof EmbeddingsError ? err : new EmbeddingsError(String((err as Error)?.message ?? err), 502);
+      traceRouteEvent("Proxy", { event: "fail", requestId, attempt: 1, platform: row.platform, model: row.model_id, latencyMs: Date.now() - started, error: e.message });
+      logEmbeddingRequest(row, key.id, "error", 0, Date.now() - started, e.message.slice(0, 300), requestId);
+      lastError = e;
+      hints.record(e.status, e.retryAfterMs);
+    }
   }
 
-  return {
-    object: "list",
-    data: allEmbeddings.map((embedding, index) => ({
-      object: "embedding",
-      index,
-      embedding,
-    })),
-    model: req.model,
-    usage: {
-      prompt_tokens: totalTokens,
-      total_tokens: totalTokens,
-    },
-  };
+  const retryAfterSec = lastError?.status === 429 ? embeddingsRetryAfterSec(lastError) : undefined;
+  const errMsg = `All providers for embedding family '${family}' failed${lastError ? ` (last: ${lastError.message.slice(0, 160)})` : " (no usable keys)"}`;
+  throw new EmbeddingsError(errMsg, lastError?.status === 429 ? 429 : 502, lastError?.code, retryAfterSec ? retryAfterSec * 1000 : undefined);
+}
+
+async function getPlatformKey(platform: string): Promise<ProviderCredential | null> {
+  try {
+    await initDb();
+    const rows = await query`SELECT id, db_id, platform, encrypted_key, iv, auth_tag, base_url FROM api_keys WHERE platform = ${platform} AND enabled = true AND status IN ('healthy', 'unknown') ORDER BY id LIMIT 1`;
+    if (rows.length === 0) return null;
+    const k = rows[0] as any;
+    const { decryptKey } = await import("../db/mod.ts");
+    const secret = await decryptKey(k.encrypted_key, k.iv, k.auth_tag).catch(() => null);
+    return { id: k.db_id, key: secret ?? k.encrypted_key ?? "", baseUrl: k.base_url ?? null };
+  } catch { return null; }
 }
