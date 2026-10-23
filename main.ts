@@ -207,36 +207,36 @@ app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
 
-// Settings (operator configuration endpoints) - mounted at /api/settings
+// Settings (operator configuration endpoints) - mounted at /v1/settings
 import { getClaudeModelMap, setClaudeModelMap } from "./services/anthropic-map.ts";
 import { getGeminiModelMap, setGeminiModelMap } from "./services/gemini-map.ts";
 import { getSetting } from "./db/pg.ts";
 
-app.get("/api/settings/anthropic-map", async (c) => {
+app.get("/v1/settings/anthropic-map", async (c) => {
   const map = await getClaudeModelMap();
   return c.json({ map });
 });
-app.put("/api/settings/anthropic-map", async (c) => {
+app.put("/v1/settings/anthropic-map", async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
   try { const map = await setClaudeModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid anthropic model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
 });
 
-app.get("/api/settings/gemini-map", async (c) => {
+app.get("/v1/settings/gemini-map", async (c) => {
   const map = await getGeminiModelMap();
   return c.json({ map });
 });
-app.put("/api/settings/gemini-map", async (c) => {
+app.put("/v1/settings/gemini-map", async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
   try { const map = await setGeminiModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid gemini model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
 });
 
-app.get("/api/settings/default-embedding-family", async (c) => {
+app.get("/v1/settings/default-embedding-family", async (c) => {
   const family = await getSetting<string>("embeddings_default_family");
   return c.json({ family: family ?? "openai/text-embedding-3-small" });
 });
-app.put("/api/settings/default-embedding-family", async (c) => {
+app.put("/v1/settings/default-embedding-family", async (c) => {
   let body: { family?: string };
   try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
   if (!body.family) return c.json({ error: { type: "invalid_request_error", message: "family is required" } }, 400);
