@@ -710,6 +710,18 @@ api.get("/fallback/quota-forecast", async (c) => {
   return c.json({ forecast, generatedAt: new Date().toISOString() });
 });
 
+/** POST /fallback/cooldown-probe/trigger — manual probe pass for the dashboard. */
+api.post("/fallback/cooldown-probe/trigger", async (c) => {
+  try {
+    const { triggerCooldownProbe } = await import("../services/cooldown-probe.ts");
+    const r = await triggerCooldownProbe();
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    console.warn("[api] cooldown-probe trigger failed:", e instanceof Error ? e.message : e);
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
 api.post("/guardrails/usage-cap", async (c) => {
   const body = await c.req.json();
   return c.json({ ok: true, ...body });
