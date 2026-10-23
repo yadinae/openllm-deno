@@ -262,6 +262,7 @@ app.get("/v1/providers", (c) => {
 
 // ── Settings routes (operator configuration) ──────────────────────────────────
 // Registered BEFORE the SPA catch-all so they take precedence
+// DEPLOY_MARKER_v2: 2026-10-23
 
 app.on("GET", "/settings/anthropic-map", async (c) => {
   const map = await getClaudeModelMap();
