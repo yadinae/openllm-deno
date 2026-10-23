@@ -75,7 +75,7 @@ export async function getModels(c: Context) {
   }
 
   // Add Claude family discovery entries (for Anthropic clients)
-  for (const entry of claudeFamilyDiscoveryEntries()) {
+  for (const entry of await claudeFamilyDiscoveryEntries()) {
     if (seen.has(entry.id)) continue;
     seen.add(entry.id);
     data.push({

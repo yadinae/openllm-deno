@@ -161,8 +161,8 @@ export const CLAUDE_FAMILY_ALIASES: { id: string; family: ClaudeFamily; label: s
   { id: "claude-haiku-4-5", family: "haiku", label: "Haiku" },
 ];
 
-export function claudeFamilyDiscoveryEntries(): { id: string; displayName: string }[] {
-  const map = { default: "auto", opus: "auto", sonnet: "auto", haiku: "auto" };
+export async function claudeFamilyDiscoveryEntries(): Promise<{ id: string; displayName: string }[]> {
+  const map = await getClaudeModelMap();
   return CLAUDE_FAMILY_ALIASES.map(({ id, family, label }) => {
     const target = map[family];
     return {
