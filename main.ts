@@ -152,6 +152,7 @@ console.log("[openllm] request logger started (batch flush every 5s)");
 // DEPLOY_MARKER_v5: 2026-10-23
 
 app.get("/settings/anthropic-map", async (c) => {
+  console.log("[openllm] /settings/anthropic-map GET matched");
   const map = await getClaudeModelMap();
   return c.json({ map });
 });
