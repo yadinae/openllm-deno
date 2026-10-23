@@ -207,7 +207,7 @@ app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
 
-// Settings (operator configuration endpoints) - mounted directly on app
+// Settings (operator configuration endpoints) - mounted directly on app (v2)
 import { getClaudeModelMap, setClaudeModelMap } from "./services/anthropic-map.ts";
 import { getGeminiModelMap, setGeminiModelMap } from "./services/gemini-map.ts";
 import { getSetting } from "./db/pg.ts";
