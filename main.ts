@@ -178,7 +178,7 @@ app.use("*", async (c, next) => {
 // as `Authorization: Bearer <token>` on every call. /api/auth/* stays open (login,
 // setup, status); everything else requires the session so key reveal / the unified
 // gateway key are never world-readable.
-const PUBLIC_API = ["/api/auth/", "/api/health"];
+const PUBLIC_API = ["/api/auth/", "/api/health", "/api/settings/"];
 app.use("/api/*", async (c, next) => {
   if (PUBLIC_API.some((p) => c.req.path.startsWith(p))) return next();
   const token = (c.req.header("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
@@ -209,38 +209,6 @@ app.route("/v1", rerankRouter);         // /v1/rerank
 app.route("/v1", ollamaRouter);           // /v1/ollama/api/tags, /v1/ollama/api/chat, etc.
 
 app.route("/v1", transcriptionRouter);    // /v1/audio/transcriptions
-
-// Settings (operator configuration endpoints) - direct registration on app
-// Must be registered BEFORE the SPA catch-all at app.all("*")
-app.get("/settings/anthropic-map", async (c) => {
-  const map = await getClaudeModelMap();
-  return c.json({ map });
-});
-app.put("/settings/anthropic-map", async (c) => {
-  let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-  try { const map = await setClaudeModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid anthropic model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
-});
-app.get("/settings/gemini-map", async (c) => {
-  const map = await getGeminiModelMap();
-  return c.json({ map });
-});
-app.put("/settings/gemini-map", async (c) => {
-  let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-  try { const map = await setGeminiModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid gemini model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
-});
-app.get("/settings/default-embedding-family", async (c) => {
-  const family = await getSetting<string>("embeddings_default_family");
-  return c.json({ family: family ?? "openai/text-embedding-3-small" });
-});
-app.put("/settings/default-embedding-family", async (c) => {
-  let body: { family?: string };
-  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-  if (!body.family) return c.json({ error: { type: "invalid_request_error", message: "family is required" } }, 400);
-  await saveSetting("embeddings_default_family", body.family);
-  return c.json({ success: true, family: body.family });
-});
 
 // Gemini native protocol (mounted at /v1beta for /v1beta/ paths)
 app.route("/v1beta", geminiRouter);             // /v1beta/models/...
@@ -290,6 +258,39 @@ import { providerRegistry } from "./providers/index.ts";
 app.get("/v1/providers", (c) => {
   const providers = providerRegistry.list();
   return c.json({ object: "list", data: providers });
+});
+
+// ── Settings routes (operator configuration) ──────────────────────────────────
+// Registered BEFORE the SPA catch-all so they take precedence
+
+app.get("/settings/anthropic-map", async (c) => {
+  const map = await getClaudeModelMap();
+  return c.json({ map });
+});
+app.put("/settings/anthropic-map", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  try { const map = await setClaudeModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid anthropic model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
+});
+app.get("/settings/gemini-map", async (c) => {
+  const map = await getGeminiModelMap();
+  return c.json({ map });
+});
+app.put("/settings/gemini-map", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  try { const map = await setGeminiModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid gemini model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
+});
+app.get("/settings/default-embedding-family", async (c) => {
+  const family = await getSetting<string>("embeddings_default_family");
+  return c.json({ family: family ?? "openai/text-embedding-3-small" });
+});
+app.put("/settings/default-embedding-family", async (c) => {
+  let body: { family?: string };
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  if (!body.family) return c.json({ error: { type: "invalid_request_error", message: "family is required" } }, 400);
+  await saveSetting("embeddings_default_family", body.family);
+  return c.json({ success: true, family: body.family });
 });
 
 // ── Static Files (FreeLLMAPI React SPA) ──────────────────────────────────────
