@@ -147,50 +147,38 @@ import { classifyClientAgent } from "./services/client-classifier.ts";
 requestLogger.start();
 console.log("[openllm] request logger started (batch flush every 5s)");
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// ── Settings routes (operator configuration) ──────────────────────────────────
+// Registered BEFORE the SPA catch-all so they take precedence
+// DEPLOY_MARKER_v5: 2026-10-23
 
-// Settings routes middleware — intercepts /settings/* BEFORE any route matching
-// to ensure they never fall through to the SPA catch-all.
-app.use("/settings/*", async (c, next) => {
-  const path = c.req.path;
-  // Known settings endpoints — serve directly
-  if (path === "/settings/anthropic-map") {
-    if (c.req.method === "GET") {
-      const map = await getClaudeModelMap();
-      return c.json({ map });
-    }
-    if (c.req.method === "PUT") {
-      let body: unknown;
-      try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-      try { const map = await setClaudeModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid anthropic model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
-    }
-  }
-  if (path === "/settings/gemini-map") {
-    if (c.req.method === "GET") {
-      const map = await getGeminiModelMap();
-      return c.json({ map });
-    }
-    if (c.req.method === "PUT") {
-      let body: unknown;
-      try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-      try { const map = await setGeminiModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid gemini model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
-    }
-  }
-  if (path === "/settings/default-embedding-family") {
-    if (c.req.method === "GET") {
-      const family = await getSetting<string>("embeddings_default_family");
-      return c.json({ family: family ?? "openai/text-embedding-3-small" });
-    }
-    if (c.req.method === "PUT") {
-      let body: { family?: string };
-      try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
-      if (!body.family) return c.json({ error: { type: "invalid_request_error", message: "family is required" } }, 400);
-      await saveSetting("embeddings_default_family", body.family);
-      return c.json({ success: true, family: body.family });
-    }
-  }
-  // Unknown settings path or method
-  return c.json({ error: { type: "invalid_request_error", message: "Not found" } }, 404);
+app.get("/settings/anthropic-map", async (c) => {
+  const map = await getClaudeModelMap();
+  return c.json({ map });
+});
+app.put("/settings/anthropic-map", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  try { const map = await setClaudeModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid anthropic model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
+});
+app.get("/settings/gemini-map", async (c) => {
+  const map = await getGeminiModelMap();
+  return c.json({ map });
+});
+app.put("/settings/gemini-map", async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  try { const map = await setGeminiModelMap(body); return c.json({ map }); } catch (e) { return c.json({ error: { type: "invalid_request_error", message: `Invalid gemini model map: ${e instanceof Error ? e.message : String(e)}` } }, 400); }
+});
+app.get("/settings/default-embedding-family", async (c) => {
+  const family = await getSetting<string>("embeddings_default_family");
+  return c.json({ family: family ?? "openai/text-embedding-3-small" });
+});
+app.put("/settings/default-embedding-family", async (c) => {
+  let body: { family?: string };
+  try { body = await c.req.json(); } catch { return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON" } }, 400); }
+  if (!body.family) return c.json({ error: { type: "invalid_request_error", message: "family is required" } }, 400);
+  await saveSetting("embeddings_default_family", body.family);
+  return c.json({ success: true, family: body.family });
 });
 
 app.use("*", async (c, next) => {
