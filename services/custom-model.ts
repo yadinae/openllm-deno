@@ -31,6 +31,12 @@ export interface CustomModel {
     api_key_ref?: string;
     parameters?: Record<string, any>;
   };
+  // Quota limits (optional, for routing priority / budget enforcement)
+  rpm_limit?: number;
+  rpd_limit?: number;
+  tpm_limit?: number;
+  tpd_limit?: number;
+  monthly_token_budget?: string;
   status: "active" | "deprecated" | "retired" | "pending_sync";
   version: string;
   sync_status: "synced" | "pending" | "failed";
@@ -50,6 +56,11 @@ export interface ModelRegistration {
   capabilities: CustomModel["capabilities"];
   pricing: CustomModel["pricing"];
   config: CustomModel["config"];
+  rpm_limit?: number;
+  rpd_limit?: number;
+  tpm_limit?: number;
+  tpd_limit?: number;
+  monthly_token_budget?: string;
 }
 
 export interface SyncResult {
@@ -108,13 +119,18 @@ export async function registerCustomModel(
     INSERT INTO custom_models (
       id, name, display_name, provider, base_model, description,
       capabilities, pricing, config, status, version, sync_status,
+      rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget,
       created_at, updated_at
     ) VALUES (
       ${model.id}, ${model.name}, ${model.display_name}, ${model.provider},
       ${model.base_model ?? null}, ${model.description ?? null},
       ${JSON.stringify(model.capabilities)}, ${JSON.stringify(model.pricing)},
       ${JSON.stringify(model.config)}, ${model.status}, ${model.version},
-      ${model.sync_status}, ${model.created_at}, ${model.updated_at}
+      ${model.sync_status},
+      ${model.rpm_limit ?? null}, ${model.rpd_limit ?? null},
+      ${model.tpm_limit ?? null}, ${model.tpd_limit ?? null},
+      ${model.monthly_token_budget ?? null},
+      ${model.created_at}, ${model.updated_at}
     )
   `;
 
@@ -211,7 +227,12 @@ export async function updateCustomModel(
         config = ${JSON.stringify(updated.config)},
         version = ${updated.version},
         updated_at = ${updated.updated_at},
-        sync_status = ${updated.sync_status}
+        sync_status = ${updated.sync_status},
+        rpm_limit = ${updated.rpm_limit ?? null},
+        rpd_limit = ${updated.rpd_limit ?? null},
+        tpm_limit = ${updated.tpm_limit ?? null},
+        tpd_limit = ${updated.tpd_limit ?? null},
+        monthly_token_budget = ${updated.monthly_token_budget ?? null}
     WHERE id = ${modelId}
   `;
   
@@ -389,6 +410,11 @@ function mapRowToModel(row: any): CustomModel {
     capabilities: typeof row.capabilities === "string" ? JSON.parse(row.capabilities) : row.capabilities,
     pricing: typeof row.pricing === "string" ? JSON.parse(row.pricing) : row.pricing,
     config: typeof row.config === "string" ? JSON.parse(row.config) : row.config,
+    rpm_limit: row.rpm_limit ?? undefined,
+    rpd_limit: row.rpd_limit ?? undefined,
+    tpm_limit: row.tpm_limit ?? undefined,
+    tpd_limit: row.tpd_limit ?? undefined,
+    monthly_token_budget: row.monthly_token_budget ?? undefined,
     status: row.status,
     version: row.version,
     sync_status: row.sync_status,
@@ -405,7 +431,8 @@ export async function loadCustomRoutableModels(platform: string) {
   try {
     await initDb();
     const rows = await query`
-      SELECT id, display_name, provider, capabilities, pricing, config
+      SELECT id, display_name, provider, capabilities, pricing, config,
+             rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget
       FROM custom_models
       WHERE provider = ${platform} AND status = 'active'
     `;
@@ -430,11 +457,11 @@ export async function loadCustomRoutableModels(platform: string) {
         supportsVision: caps.vision === true,
         supportsTools: caps.tools === true,
         contextWindow: caps.max_context ?? 128000,
-        rpmLimit: null,
-        rpdLimit: null,
-        tpmLimit: null,
-        tpdLimit: null,
-        monthlyTokenBudget: "",
+        rpmLimit: r.rpm_limit ?? null,
+        rpdLimit: r.rpd_limit ?? null,
+        tpmLimit: r.tpm_limit ?? null,
+        tpdLimit: r.tpd_limit ?? null,
+        monthlyTokenBudget: r.monthly_token_budget ?? "",
         intelligenceRank: intelRank,
         sizeLabel,
       });
@@ -461,6 +488,11 @@ CREATE TABLE IF NOT EXISTS custom_models (
   status TEXT NOT NULL CHECK (status IN ('active', 'deprecated', 'retired', 'pending_sync')),
   version TEXT NOT NULL DEFAULT '1.0.0',
   sync_status TEXT NOT NULL CHECK (sync_status IN ('synced', 'pending', 'failed')),
+  rpm_limit INTEGER,
+  rpd_limit INTEGER,
+  tpm_limit INTEGER,
+  tpd_limit INTEGER,
+  monthly_token_budget TEXT,
   last_synced_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
