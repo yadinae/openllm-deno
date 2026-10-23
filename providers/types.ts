@@ -246,6 +246,9 @@ export interface RoutingContext {
   client_profile?: ClientProfile;
   preferred_provider?: string;
   excluded_providers?: string[];
+  /** Sticky-session affinity key (from the X-Session-Id header). When absent
+   * the router falls back to hashing the first user turn. */
+  session_id?: string;
 }
 
 export interface RoutingDecision {

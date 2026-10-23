@@ -360,34 +360,33 @@ try {
   console.log("[openllm] routing-decision module unavailable — skipping init");
 }
 
-// ── Catalog Sync Cron (daily at 04:30 UTC) ───────────────────────────────────
-// Pulls the signed catalog from api.freellmapi.co/v1/latest and upserts into
-// the models table, setting in_catalog=TRUE. Rows absent from the feed are
-// retired (in_catalog=FALSE) so auto-routing only uses models with free-tier
-// evidence.
+// ── Catalog Sync (signed catalog from api.freellmapi.co) ───────────────────────
+// Pulls the signed catalog, verifies Ed25519 signature, applies to Postgres.
+// Sets in_catalog=TRUE; rows absent from the feed are retired so auto-routing
+// only uses models with free-tier evidence. Runs at boot + every 12h.
+// Kill switch: CATALOG_SYNC_DISABLED=1
 try {
-  import("./services/catalog-sync.ts").then(({ syncSignedCatalog }) => {
-    // Run once at boot (fire-and-forget) to prime the catalog quickly.
-    // Guard with a short delay so the DB is ready.
-    setTimeout(() => {
-      syncSignedCatalog().then((r) =>
-        r.ok
-          ? console.log(`[catalog-sync] boot sync ok: v${r.version} upserted=${r.upserted} retired=${r.retired}`)
-          : console.error(`[catalog-sync] boot sync failed: ${r.error}`)
-      ).catch((e) => {
-        // Fire-and-forget must never reject unhandled: without this catch a
-        // missing DATABASE_URL killed the whole isolate 15s after boot.
-        console.log("[catalog-sync] boot kick skipped:", e instanceof Error ? e.message : e);
-      });
-    }, 15_000);
+  import("./services/catalog-sync.ts").then(async ({ startCatalogSync, syncCatalog }) => {
+    // Apply paid-equivalent pricing data (for analytics "estimated savings")
+    try {
+      const { applyModelPricing } = await import("./services/model-pricing.ts");
+      await applyModelPricing();
+      console.log("[openllm] model-pricing applied");
+    } catch (e) {
+      console.warn("[openllm] model-pricing apply failed (non-fatal):", e instanceof Error ? e.message : e);
+    }
+
+    // Start the sync loop (boot delay + periodic). Internally calls
+    // reapplyCachedCatalog() first for offline-safe restart.
+    startCatalogSync();
 
     // Then schedule daily at 04:30 UTC (after daily quota resets for most providers).
     if (scheduleCron("catalog-sync", "30 4 * * *", async () => {
-      const r = await syncSignedCatalog();
+      const r = await syncCatalog(true);
       if (r.ok) {
-        console.log(`[catalog-sync] ${r.version} upserted=${r.upserted} retired=${r.retired}`);
+        console.log(`[catalog-sync] ${r.version} applied=${r.action}`);
       } else {
-        console.error(`[catalog-sync] failed: ${r.error}`);
+        console.error(`[catalog-sync] failed: ${r.detail}`);
       }
     })) {
       console.log("[openllm] catalog-sync cron scheduled (daily 04:30 UTC + boot kick)");

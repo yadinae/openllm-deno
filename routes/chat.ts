@@ -126,7 +126,7 @@ chatRouter.post("/chat/completions", async (c) => {
     const vRequestId = generateRequestId();
     const vStart = Date.now();
     try {
-      const ctx: RoutingContext = { request: body, available_keys: [] };
+      const ctx: RoutingContext = { request: body, available_keys: [], session_id: c.req.header("x-session-id") ?? undefined };
       if (body.model === "fusion") {
         const decision = await smartRouter.route(ctx);
         const storedCfg = ((await getSetting<Record<string, unknown>>("fusion_config")) ?? {}) as Partial<FusionConfig>;

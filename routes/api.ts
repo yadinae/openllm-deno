@@ -4,6 +4,7 @@
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
 import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel, getCatalogModelById, type CatalogModel } from "../db/pg.ts";
+import { getRoutingScores } from "../services/router.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 import { getQuotaForecast } from "../services/quota-forecast.ts";
@@ -567,29 +568,136 @@ api.get("/fallback", async (c) => {
   return c.json(enriched);
 });
 
+/**
+ * GET /fallback/routing — the dashboard's routing panel source.
+ * Real scores for every enabled catalog model (deterministic: expected
+ * reliability, no Thompson sample), plus the strategy/weights/peak-hours
+ * state the panel renders and edits. The model list merges these by modelDbId.
+ */
 api.get("/fallback/routing", async (c) => {
   const keys = await listApiKeys();
   const enabled = keys.filter(k => k.enabled);
-  const saved = await getSetting<Record<string, unknown>>("fallback/routing") ?? {};
-  return c.json({
-    strategy: "balanced",
-    keySelectionStrategy: "auto",
-    scores: [],
-    strategies: ["balanced", "priority", "round-robin", "random", "latency-priority"],
-    activeStrategy: "balanced",
-    candidates: enabled.map(k => k.platform),
-    ...saved,
-  });
+  try {
+    const payload = await getRoutingScores();
+    return c.json({ ...payload, candidates: enabled.map(k => k.platform) });
+  } catch (e) {
+    console.warn("[api] /fallback/routing scoring failed:", e instanceof Error ? e.message : e);
+    return c.json({
+      strategy: "balanced",
+      keySelectionStrategy: "auto",
+      weights: null,
+      customWeights: {},
+      presets: {},
+      exploreEnabled: true,
+      peakAdjusted: false,
+      peakHours: {},
+      scores: [],
+      candidates: enabled.map(k => k.platform),
+    });
+  }
 });
 
+/**
+ * PUT /fallback/routing — persist dashboard edits (ported from FreeLLMAPI
+ * routes/fallback.ts): strategy, custom weights, exploration toggle, key
+ * selection, peak-hours window. Weights persist BEFORE the strategy flip so
+ * 'custom' mode reads the intended vector immediately.
+ */
+api.put("/fallback/routing", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+
+  const VALID = ["priority", "balanced", "smartest", "fastest", "reliable", "custom", "decision"];
+  const strategy = typeof body.strategy === "string" ? body.strategy : undefined;
+  if (strategy !== undefined && !VALID.includes(strategy)) {
+    return c.json({ error: { message: `Invalid strategy '${strategy}'` } }, 400);
+  }
+
+  // Custom weights: convex and not all-zero
+  if (body.weights && typeof body.weights === "object") {
+    const w = body.weights as Record<string, unknown>;
+    const r = Number(w.reliability ?? 0), s = Number(w.speed ?? 0), i = Number(w.intelligence ?? 0);
+    if (![r, s, i].every(Number.isFinite) || r < 0 || s < 0 || i < 0 || r + s + i <= 0) {
+      return c.json({ error: { message: "Custom weights must be non-negative and not all zero" } }, 400);
+    }
+    await saveSetting("routing_weights", { reliability: r, speed: s, intelligence: i });
+  }
+
+  if (strategy !== undefined) await saveSetting("routing_strategy", strategy);
+
+  if (typeof body.exploreEnabled === "boolean") {
+    await saveSetting("routing_explore_chance", body.exploreEnabled ? 0.1 : 0);
+  }
+  if (body.keySelectionStrategy === "auto" || body.keySelectionStrategy === "least-remaining") {
+    await saveSetting("routing_key_selection", body.keySelectionStrategy);
+  }
+  // Peak-hours window: only written when the body actually carries the fields
+  if (body.peakHoursAdjust !== undefined || body.peakStartHour !== undefined || body.peakEndHour !== undefined || body.peakTimezone !== undefined) {
+    const current = (await getSetting<Record<string, unknown>>("peak_hours")) ?? {};
+    const next: { enabled: boolean; startHour: number; endHour: number; timezone: string } = {
+      enabled: typeof body.peakHoursAdjust === "boolean" ? body.peakHoursAdjust : Boolean(current.enabled),
+      startHour: Number.isFinite(Number(body.peakStartHour)) ? Number(body.peakStartHour) : (Number(current.startHour) || 18),
+      endHour: Number.isFinite(Number(body.peakEndHour)) ? Number(body.peakEndHour) : (Number(current.endHour) || 6),
+      timezone: typeof body.peakTimezone === "string" && body.peakTimezone ? body.peakTimezone : (typeof current.timezone === "string" && current.timezone ? current.timezone : "UTC"),
+    };
+    if (!Number.isInteger(next.startHour) || next.startHour < 0 || next.startHour > 23 ||
+        !Number.isInteger(next.endHour) || next.endHour < 0 || next.endHour > 23) {
+      return c.json({ error: { message: "Peak hours must be integers 0-23" } }, 400);
+    }
+    await saveSetting("peak_hours", next);
+  }
+
+  const payload = await getRoutingScores();
+  return c.json(payload);
+});
+
+/** GET /fallback/penalty-inspector — models currently carrying a failure penalty. */
 api.get("/fallback/penalty-inspector", async (c) => {
-  const penalties = await getSetting("fallback-penalties");
-  return c.json({ penalties: penalties || {} });
+  try {
+    const rows = await query`
+      SELECT m.id AS "modelDbId", p.platform, p.model_id AS "modelId", p.penalty, p.updated_at AS "updatedAt"
+      FROM rate_limit_penalties p
+      JOIN models m ON m.platform = p.platform AND m.model_id = p.model_id
+      WHERE p.penalty > 0
+      ORDER BY p.penalty DESC
+    `;
+    return c.json({ penalties: rows });
+  } catch {
+    return c.json({ penalties: [] });
+  }
 });
 
+/**
+ * GET /fallback/rate-limit-usage — live rpm/rpd/tpm windows per catalog model,
+ * straight from the requests ledger (the same numbers the headroom guardrail
+ * reads, so the dashboard badge and the router never disagree).
+ */
 api.get("/fallback/rate-limit-usage", async (c) => {
-  const rows = await getSetting<unknown[]>("rate-limit-usage");
-  return c.json({ rows: Array.isArray(rows) ? rows : [] });
+  try {
+    const nowMs = Date.now();
+    const minIso = new Date(nowMs - 60_000).toISOString();
+    const dayIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+    const rows = await query`
+      SELECT m.id AS "modelDbId", m.platform, m.model_id AS "modelId",
+             m.rpm_limit AS "rpmLimit", m.rpd_limit AS "rpdLimit", m.tpm_limit AS "tpmLimit",
+             COALESCE(u.rpm_used, 0) AS "rpmUsed",
+             COALESCE(u.rpd_used, 0) AS "rpdUsed",
+             COALESCE(u.tpm_used, 0) AS "tpmUsed"
+        FROM models m
+        LEFT JOIN (
+          SELECT platform, model,
+                 COUNT(*) FILTER (WHERE timestamp >= ${minIso}::text) AS rpm_used,
+                 COUNT(*) AS rpd_used,
+                 COALESCE(SUM(input_tokens + output_tokens) FILTER (WHERE timestamp >= ${minIso}::text), 0) AS tpm_used
+            FROM requests
+           WHERE timestamp >= ${dayIso}::text
+           GROUP BY platform, model
+        ) u ON u.platform = m.platform AND u.model = m.model_id
+       WHERE m.enabled = 1
+    `;
+    return c.json({ rows });
+  } catch {
+    return c.json({ rows: [] });
+  }
 });
 
 api.get("/fallback/token-usage", async (c) => {

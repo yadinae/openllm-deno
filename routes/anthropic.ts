@@ -82,10 +82,10 @@ async function getApiKeyForPlatform(platform: string): Promise<ApiKey | null> {
   };
 }
 
-async function dispatchChat(body: ChatCompletionRequest): Promise<ProviderResult> {
+async function dispatchChat(body: ChatCompletionRequest, sessionId?: string): Promise<ProviderResult> {
   const parts = body.model.split("/");
   if (parts[0] === "auto" || parts[0] === "fusion") {
-    const ctx = { request: body, available_keys: [] };
+    const ctx = { request: body, available_keys: [], session_id: sessionId };
     return executeWithFallback(body, ctx);
   }
   const platform = parts[0];
@@ -151,7 +151,7 @@ anthropicRouter.post("/messages", async (c) => {
   };
 
   try {
-    const result = await dispatchChat(openAIReq);
+    const result = await dispatchChat(openAIReq, c.req.header("x-session-id") ?? undefined);
     if (result.error) {
       const status: number = result.status ?? 502;
       return c.json({ error: { type: "api_error", message: result.error } }, status as 400 | 500 | 502 | 503);

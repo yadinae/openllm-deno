@@ -259,6 +259,35 @@ export function intelligenceScore(composite: number, min: number, max: number): 
 // Export RANK_SCALE for use in router.ts
 export { RANK_SCALE };
 
+// ── Monthly budget label parsing (ported from FreeLLMAPI lib/budget.ts) ─────
+
+/**
+ * Parse a human budget label like '~120M', '~50-100M', '~500K' (optionally
+ * with period/unit suffixes like '/day', 'rpd') into an absolute token count.
+ * Returns 0 meaning "no budget info" — callers treat 0 as no headroom limit.
+ *
+ * Guards (each learned as a production bug upstream):
+ *  - rate labels without a magnitude unit ('free · 40 RPM') are NOT budgets;
+ *  - request-count budgets ('14.4K rpd', '1K calls/mo') are NOT token budgets;
+ *  - daily caps ('500K tokens/day') scale ×30 into the monthly pool;
+ *  - parenthetical rate hints ('~2M (60-100/hr)') are stripped before scanning.
+ */
+export function parseBudget(s: string): number {
+  if (!s) return 0;
+  const label = String(s).toLowerCase();
+  const head = label.replace(/\([^)]*\)/g, '').trim();
+  const m = head.match(/~?([\d.]+)(?:-([\d.]+))?([mk])(?![a-z])/);
+  if (!m) return 0;
+  const high = parseFloat(m[2] ?? m[1]);
+  if (Number.isNaN(high)) return 0;
+  const tail = head.slice((m.index ?? 0) + m[0].length);
+  if (/^\s*(?:rpd|rpm|rph|rps|req|requests?|calls?|messages?|prompts?|neurons?)\b/.test(tail)) return 0;
+  const tokens = high * (m[3] === 'm' ? 1_000_000 : 1_000);
+  const period = tail.split(/[,·;]/)[0];
+  const perDay = /\b(?:per\s*)?days?\b|\bdaily\b|\b24\s*h(?:rs?|ours?)?\b/.test(period);
+  return perDay ? tokens * 30 : tokens;
+}
+
 // ── Guardrail: headroom (monthly budget & rate window share same ramp) ──────
 export const HEADROOM_FLOOR = 0.1;
 export const HEADROOM_RAMP_START = 0.2;

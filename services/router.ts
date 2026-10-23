@@ -68,6 +68,7 @@ import {
   headroomFactor,
   rateWindowHeadroomFactor,
   rateLimitFactor,
+  parseBudget,
   sampleBeta,
   combineScore,
   // Settings keys
@@ -86,20 +87,45 @@ import { getKeyQuotaHeadroom } from "./provider-quota.ts";
 import { reserveMonthlyBudget, settleMonthlyUsage } from "./key-budget.ts";
 import { getRoutingStrategyForRequest, initDecisionSettings } from "./routing-decision.ts";
 
-/** Cached metrics for scoring (refreshed periodically) */
+/**
+ * Cached metrics for scoring (refreshed periodically).
+ *
+ * The `weighted_*` fields are RAW decay-weighted pseudo-counts (a request from
+ * today counts 1.0, one from 2 days ago 0.5, 4 days 0.25 — half-life 2 days),
+ * NOT normalized ratios. The Beta posterior and the exploration gate both read
+ * sample SIZE out of them: normalizing to [0,1] collapses every model's
+ * posterior onto ~0.5 and makes every model look permanently "under-observed".
+ */
 interface CachedMetrics {
   latency_p50: number; // ms
-  cost_per_1k: number; // USD
+  cost_per_1k: number; // USD, from paid_*_per_m pricing (0 = unknown/free)
   quality_score: number; // 0-1 (from intelligence_rank)
-  success_rate: number; // 0-1
+  success_rate: number; // weighted success fraction over the 7-day window
   last_updated: number;
-  // Decay-weighted stats (half-life 2 days)
+  // Decay-weighted RAW pseudo-counts (half-life 2 days) — Beta posterior input
   weighted_successes: number;
   weighted_failures: number;
-  weighted_tok_per_sec: number;
-  weighted_ttfb_ms: number;
-  penalty: number; // 429 penalty (max 10)
+  weighted_tok_per_sec: number; // Σ(w·out_tokens) / Σ(w·latency) over successes
+  weighted_ttfb_ms: number;     // weighted mean; approximate (no ttfb column — see computeMetrics)
+  penalty: number; // failure penalty (429=+3, fail=+1, max 10)
   community_prior?: CommunityReliabilityPrior;
+  // Model row (catalog) — gates + guardrails + dashboard
+  model_db_id: number | null;
+  supports_vision: number; // 0/1 (unknown = 0, catalog convention)
+  supports_tools: number;  // 0/1
+  context_window: number | null; // null = unknown → never gated
+  monthly_token_budget: string;  // human label ('~120M'), parsed by parseBudget
+  rpm_limit: number | null;
+  rpd_limit: number | null;
+  tpm_limit: number | null;
+  tpd_limit: number | null;
+  fallback_priority: number; // operator chain position (fallback_config), 0 = unchained
+  // Live utilization (from the requests ledger)
+  monthly_used_tokens: number; // calendar-month input+output for this model
+  rpm_used: number; // requests in the last 60s
+  rpd_used: number; // requests in the last 24h
+  tpm_used: number; // tokens in the last 60s
+  tpd_used: number; // tokens in the last 24h
 }
 
 const PROVIDER_MODEL_CACHE = new Map<string, { at: number; models: ModelInfo[] }>();
@@ -108,10 +134,175 @@ const PROVIDER_MODEL_TTL_MS = 10 * 60 * 1000; // upstream /models lists change r
 const METRICS_CACHE = new Map<string, CachedMetrics>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+// ── Request-size gates (ported from FreeLLMAPI router.ts) ─────────────────────
+
+/**
+ * The output portion of a routed request's size estimate is capped: a client
+ * that sets max_tokens=200k must not exclude every 128k model — the INPUT has
+ * to fit, not input+full-max_tokens. (#470)
+ */
+export const OUTPUT_RESERVE_CAP = 2000;
+export function routingReserveTokens(requestedMaxTokens: number | null | undefined): number {
+  const requested = Number(requestedMaxTokens ?? 0);
+  if (!Number.isFinite(requested) || requested <= 0) return 1000;
+  return Math.min(requested, OUTPUT_RESERVE_CAP);
+}
+
+/** chars/4 heuristic over message text + system prompt (FreeLLMAPI parity). */
+export function estimateRequestTokens(request: ChatCompletionRequest): number {
+  let chars = 0;
+  const sys = (request as unknown as Record<string, unknown>).system;
+  if (typeof sys === "string") chars += sys.length;
+  const msgs = Array.isArray(request.messages) ? request.messages : [];
+  for (const msg of msgs) {
+    const c = (msg as unknown as Record<string, unknown>).content;
+    if (typeof c === "string") chars += c.length;
+    else if (Array.isArray(c)) {
+      for (const part of c) {
+        const p = part as Record<string, unknown>;
+        if (typeof p.text === "string") chars += p.text.length;
+      }
+    }
+  }
+  return Math.ceil(chars / 4) + routingReserveTokens(request.max_tokens);
+}
+
+export const CONTEXT_WINDOW_SAFETY_FACTOR = 1.25;
+
+/** True when the request fits the RAW advertised window (null = unknown, never
+ * filtered — a dispatch to a model that genuinely can't hold it is a
+ * guaranteed upstream 400, so this is the hard gate). */
+export function fitsContextWindowStrict(contextWindow: number | null | undefined, estimatedTokens: number): boolean {
+  return contextWindow == null || estimatedTokens <= contextWindow;
+}
+
+/** True when the request fits WITH the heuristic safety margin. Margin-
+ * violating-but-raw-fitting models are NOT excluded — they're a SOFT
+ * preference deferred behind margin-fitting candidates (#956: /v1/models
+ * advertises the raw window, clients legitimately pack up to it). */
+export function fitsContextWindow(contextWindow: number | null | undefined, estimatedTokens: number, exactOutputReserve = 0): boolean {
+  if (contextWindow == null) return true;
+  if (estimatedTokens > contextWindow) return false;
+  const reserve = Math.max(0, exactOutputReserve);
+  const heuristic = Math.max(0, estimatedTokens - reserve);
+  return heuristic * CONTEXT_WINDOW_SAFETY_FACTOR + reserve <= contextWindow;
+}
+
+/** True when any message carries image content (OpenAI or Anthropic shape). */
+export function requestNeedsVision(request: ChatCompletionRequest): boolean {
+  const msgs = Array.isArray(request.messages) ? request.messages : [];
+  for (const msg of msgs) {
+    const c = (msg as unknown as Record<string, unknown>).content;
+    if (!Array.isArray(c)) continue;
+    for (const part of c) {
+      const type = (part as Record<string, unknown>)?.type;
+      if (type === "image_url" || type === "image" || type === "input_image") return true;
+    }
+  }
+  return false;
+}
+
+/** True when the request offers tools the model may be expected to call. */
+export function requestNeedsTools(request: ChatCompletionRequest): boolean {
+  const req = request as unknown as Record<string, unknown>;
+  return Array.isArray(req.tools) && req.tools.length > 0;
+}
+
+/**
+ * Live rate-window pressure for a model: worst used-fraction across
+ * rpm/rpd/tpm/tpd, from the requests ledger collected by computeMetrics.
+ * Null/zero limits contribute nothing; no limits at all → 0 (ungated).
+ */
+export function windowUsedFraction(m: CachedMetrics): number {
+  const ratios: number[] = [];
+  if (m.rpm_limit && m.rpm_limit > 0) ratios.push(m.rpm_used / m.rpm_limit);
+  if (m.rpd_limit && m.rpd_limit > 0) ratios.push(m.rpd_used / m.rpd_limit);
+  if (m.tpm_limit && m.tpm_limit > 0) ratios.push(m.tpm_used / m.tpm_limit);
+  if (m.tpd_limit && m.tpd_limit > 0) ratios.push(m.tpd_used / m.tpd_limit);
+  if (ratios.length === 0) return 0;
+  return Math.min(1, Math.max(...ratios));
+}
+
+// ── Sticky sessions (ported from FreeLLMAPI proxy.ts) ─────────────────────────
+// A multi-turn conversation keeps landing on the same model: KV-cache warmth,
+// consistent voice, and no mid-conversation capability surprises. Keyed by an
+// explicit session id header when present, else the first user message (the
+// conversation's fingerprint). 30-minute TTL, LRU-ish eviction at 500 entries.
+
+const STICKY_TTL_MS = 30 * 60 * 1000;
+const stickySessionMap = new Map<string, { modelKey: string; lastUsed: number }>();
+
+async function sha1Hex(payload: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Conversation key: explicit session id wins, else hash of first user turn. */
+export async function stickySessionKey(
+  request: ChatCompletionRequest,
+  sessionId?: string,
+  strategyKey?: string,
+): Promise<string> {
+  const scoped = (base: string) => (strategyKey ? `${base}::${strategyKey}` : `${base}`);
+  if (sessionId) return scoped(`hdr:${sessionId}`);
+  const firstUser = (request.messages ?? []).find((m) => (m as unknown as Record<string, unknown>).role === "user");
+  if (!firstUser) return "";
+  const c = (firstUser as unknown as Record<string, unknown>).content;
+  const text = typeof c === "string"
+    ? c
+    : Array.isArray(c)
+      ? c.map((p) => String((p as Record<string, unknown>)?.text ?? "")).join("")
+      : "";
+  if (!text) return "";
+  return scoped(await sha1Hex(text));
+}
+
+/** The model this conversation stuck to earlier, or undefined. Only consulted
+ * once the conversation has an assistant turn (first turn routes freely). */
+export async function getStickyModel(
+  request: ChatCompletionRequest,
+  sessionId?: string,
+  strategyKey?: string,
+): Promise<string | undefined> {
+  const hasAssistant = (request.messages ?? []).some((m) => (m as unknown as Record<string, unknown>).role === "assistant");
+  if (!hasAssistant) return undefined;
+  const key = await stickySessionKey(request, sessionId, strategyKey);
+  if (!key) return undefined;
+  const entry = stickySessionMap.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.lastUsed > STICKY_TTL_MS) {
+    stickySessionMap.delete(key);
+    return undefined;
+  }
+  return entry.modelKey;
+}
+
+export async function setStickyModel(
+  request: ChatCompletionRequest,
+  modelKey: string,
+  sessionId?: string,
+  strategyKey?: string,
+): Promise<void> {
+  const key = await stickySessionKey(request, sessionId, strategyKey);
+  if (!key) return;
+  stickySessionMap.set(key, { modelKey, lastUsed: Date.now() });
+  if (stickySessionMap.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of stickySessionMap) {
+      if (now - v.lastUsed > STICKY_TTL_MS) stickySessionMap.delete(k);
+    }
+    if (stickySessionMap.size > 1000) {
+      // Hard cap: evict oldest by lastUsed
+      const oldest = [...stickySessionMap.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      for (const [k] of oldest.slice(0, stickySessionMap.size - 1000)) stickySessionMap.delete(k);
+    }
+  }
+}
+
 /** Default fallback metrics when no history available */
 const DEFAULT_METRICS: CachedMetrics = {
   latency_p50: 2000,
-  cost_per_1k: 0.001,
+  cost_per_1k: 0,
   quality_score: 0.5,
   success_rate: 0.95,
   last_updated: 0,
@@ -120,6 +311,21 @@ const DEFAULT_METRICS: CachedMetrics = {
   weighted_tok_per_sec: 0,
   weighted_ttfb_ms: 0,
   penalty: 0,
+  model_db_id: null,
+  supports_vision: 0,
+  supports_tools: 0,
+  context_window: null,
+  monthly_token_budget: "",
+  rpm_limit: null,
+  rpd_limit: null,
+  tpm_limit: null,
+  tpd_limit: null,
+  fallback_priority: 0,
+  monthly_used_tokens: 0,
+  rpm_used: 0,
+  rpd_used: 0,
+  tpm_used: 0,
+  tpd_used: 0,
 };
 
 /**
@@ -134,7 +340,7 @@ export class SmartRouter {
    * This returns the configured strategy; for 'decision' it returns 'decision'.
    * Use resolveStrategyForRequest() to get the actual preset for a request.
    */
-  private async getRoutingStrategy(): Promise<RoutingStrategy> {
+  async getRoutingStrategy(): Promise<RoutingStrategy> {
     const strat = await getSetting<string>(SETTING_ROUTING_STRATEGY);
     return (strat as RoutingStrategy) ?? DEFAULT_STRATEGY;
   }
@@ -143,16 +349,19 @@ export class SmartRouter {
    * Resolve the routing strategy for a specific request.
    * For 'decision' strategy, calls the decision model to pick a preset.
    * Caches the decision for 30 minutes.
+   *
+   * 'priority' (operator chain order + failure demotion) and 'custom' (saved
+   * weight vector) pass through as-is; only an unrecognized value falls back.
    */
   private async resolveStrategyForRequest(
     ctx: RoutingContext,
-  ): Promise<{ strategy: PresetStrategy; reasoning?: string }> {
+  ): Promise<{ strategy: RoutingStrategy; reasoning?: string }> {
     const configured = await this.getRoutingStrategy();
+    const valid: RoutingStrategy[] = ["balanced", "smartest", "fastest", "reliable", "custom", "priority"];
+    if (valid.includes(configured)) {
+      return { strategy: configured };
+    }
     if (configured !== "decision") {
-      const validPresets: PresetStrategy[] = ["balanced", "smartest", "fastest", "reliable"];
-      if (validPresets.includes(configured as PresetStrategy)) {
-        return { strategy: configured as PresetStrategy };
-      }
       return { strategy: "balanced", reasoning: `Invalid strategy '${configured}', using balanced` };
     }
 
@@ -165,7 +374,7 @@ export class SmartRouter {
   /**
    * Get custom weights from settings (if strategy is 'custom').
    */
-  private async getCustomWeights(): Promise<RoutingWeights | null> {
+  async getCustomWeights(): Promise<RoutingWeights | null> {
     const weights = await getSetting<RoutingWeights>(SETTING_ROUTING_WEIGHTS);
     return weights ?? null;
   }
@@ -173,7 +382,7 @@ export class SmartRouter {
   /**
    * Get peak-hours config from settings.
    */
-  private async getPeakHoursConfig(): Promise<PeakHoursConfig> {
+  async getPeakHoursConfig(): Promise<PeakHoursConfig> {
     const config = await getSetting<PeakHoursConfig>(SETTING_PEAK_HOURS);
     return config ?? DEFAULT_PEAK_HOURS;
   }
@@ -208,7 +417,7 @@ export class SmartRouter {
   /**
    * Get community prior for a model (stored in settings as JSON).
    */
-  private async getCommunityPrior(platform: string, modelId: string, endpointScope?: string): Promise<CommunityReliabilityPrior | undefined> {
+  async getCommunityPrior(platform: string, modelId: string, endpointScope?: string): Promise<CommunityReliabilityPrior | undefined> {
     const key = `community_prior_${platform}_${modelId}_${endpointScope ?? ""}`;
     const prior = await getSetting<CommunityReliabilityPrior>(key);
     return prior ?? undefined;
@@ -217,7 +426,7 @@ export class SmartRouter {
   /**
    * Get explore chance from settings.
    */
-  private async getExploreEnabled(): Promise<boolean> {
+  async getExploreEnabled(): Promise<boolean> {
     const chance = await getSetting<number>(SETTING_EXPLORE_CHANCE);
     return (chance ?? 0.1) > 0;
   }
@@ -233,23 +442,37 @@ export class SmartRouter {
    * Main routing entry point.
    * Collects all valid (provider, model, key) combinations,
    * scores them using the 3-axis bandit, and returns primary + fallback chain.
+   *
+   * Ordering (FreeLLMAPI orderChain parity):
+   *  - bandit strategies: rank by (possibly Thompson-sampled) score, then give
+   *    a random under-observed model a guaranteed first shot (exploration);
+   *  - 'priority': dense-rank the operator's chain positions and sink each
+   *    model by its failure penalty (429=+3, fail=+1, max 10) — dense, not raw,
+   *    so big priority gaps can't make penalties inert;
+   *  - sticky: a conversation's previous model is promoted to the front (after
+   *    capability gates, which an explicit pin never bypasses).
    */
   async route(ctx: RoutingContext): Promise<RoutingDecision> {
     // 0. Resolve routing strategy for this request (handles 'decision' strategy)
     const { strategy: resolvedStrategy, reasoning: resolvedStrategyReasoning } =
       await this.resolveStrategyForRequest(ctx);
 
-    // 1. Collect all valid candidates
+    // 1. Collect all valid candidates (capability-gated for THIS request)
     const candidates = await this.collectCandidates(ctx);
     if (candidates.length === 0) {
       throw new Error("No available providers for request");
     }
 
+    // Poolable key counts per platform: the catalog monthly budget is PER KEY,
+    // so the pooled allowance scales with the usable keys behind a platform.
+    const keyCounts = new Map<string, number>();
+    for (const c of candidates) keyCounts.set(c.platform, (keyCounts.get(c.platform) ?? 0) + 1);
+
     // 2. Score each candidate using the 3-axis bandit
     const scored = await Promise.all(
       candidates.map(async (c) => ({
         ...c,
-        score: await this.calculateScore(c, ctx, resolvedStrategy),
+        score: await this.calculateScore(c, ctx, resolvedStrategy, { keyCounts }),
       }))
     );
 
@@ -264,36 +487,103 @@ export class SmartRouter {
       // Replace the placeholder intelligence score with the normalized value
       (c as any)._normIntelligence = normIntel;
     }
+    // Normalization changed the intelligence axis — rescore once so the final
+    // ordering reflects it (the first pass was needed to see the chain).
+    const rescored = await Promise.all(
+      scored.map(async (c) => ({ ...c, score: await this.calculateScore(c, ctx, resolvedStrategy, { keyCounts }) }))
+    );
 
-    // 4. Apply reliability floor: drop chronically-failing models before final sort
+    // 4. Apply reliability floor: drop chronically-failing models before final
+    // sort. Under-observed models (fewer than exploreMinSamples observations)
+    // are KEPT so cold-start models stay in the exploration pool; if the floor
+    // would empty the chain entirely, the filter is skipped — better a
+    // possibly-flaky model than no model at all.
     const minFloor = await this.getMinReliabilityFloor();
+    let ordered = rescored;
     if (minFloor !== undefined) {
-      const before = scored.length;
-      // Filter in place by reassigning (since filter returns new array)
-      const filtered = scored.filter((c) => c.metrics.success_rate >= minFloor);
-      if (filtered.length !== scored.length) {
-        console.log(`[router] reliability floor ${minFloor} dropped ${scored.length - filtered.length} candidates`);
-        scored.length = 0;
-        scored.push(...filtered);
+      const exploreMinSamples = await this.getExploreMinSamples();
+      const kept = rescored.filter((c) => {
+        const samples = c.metrics.weighted_successes + c.metrics.weighted_failures;
+        return samples < exploreMinSamples || this.expectedReliabilityFor(c) >= minFloor;
+      });
+      if (kept.length > 0 && kept.length !== rescored.length) {
+        console.log(`[router] reliability floor ${minFloor} dropped ${rescored.length - kept.length} candidates`);
+        ordered = kept;
       }
     }
 
-    // 5. Sort by score descending (but we need to recalculate scores with normalized intelligence)
-    // For now, use the original scores; intelligence normalization is a future enhancement
-    scored.sort((a, b) => b.score - a.score);
+    // 5. Order the chain per strategy (orderChain parity)
+    const bandit = resolvedStrategy !== "priority";
+    if (bandit) {
+      ordered.sort((a, b) => b.score - a.score);
+      // Exploration probe: with EXPLORE_CHANCE probability, promote one
+      // under-observed, request-eligible model to the front so it stops
+      // losing every bandit draw to prior-heavy rivals. Never in priority
+      // mode: that's the operator's explicit order.
+      const exploreEnabled = await this.getExploreEnabled();
+      const exploreChance = await getSetting<number>(SETTING_EXPLORE_CHANCE) ?? 0.1;
+      if (exploreEnabled && Math.random() < exploreChance) {
+        const exploreMinSamples = await this.getExploreMinSamples();
+        const unmeasured = ordered.filter((c) =>
+          (c.metrics.weighted_successes + c.metrics.weighted_failures) < exploreMinSamples);
+        if (unmeasured.length > 0) {
+          const probe = unmeasured[Math.floor(Math.random() * unmeasured.length)];
+          const idx = ordered.findIndex((c) => c === probe);
+          if (idx > 0) {
+            const [row] = ordered.splice(idx, 1);
+            ordered.unshift(row);
+          }
+        }
+      }
+    } else {
+      // 'priority': dense rank of chain positions, then failure-penalty sink.
+      const distinct = [...new Set(ordered.map((c) => c.metrics.fallback_priority))].sort((a, b) => a - b);
+      const denseRank = new Map<number, number>(distinct.map((v, i) => [v, i + 1]));
+      ordered.sort((a, b) => {
+        const ka = (denseRank.get(a.metrics.fallback_priority) ?? 999) + Math.min(a.metrics.penalty, 10);
+        const kb = (denseRank.get(b.metrics.fallback_priority) ?? 999) + Math.min(b.metrics.penalty, 10);
+        return ka - kb || b.score - a.score;
+      });
+    }
 
-    // 5. Primary = top score, Fallback Chain = next 2-3 (dedup by key)
-    const primary = scored[0];
+    // 6. Sticky session: promote the conversation's previous model to the
+    // front. Capability gates already ran in collectCandidates, so a sticky
+    // model that can't serve THIS request (e.g. an image turn on a text-only
+    // model) is simply absent and the pin drops silently.
+    const isAuto = ctx.request.model === "auto" || ctx.request.model === "fusion" || !ctx.request.model;
+    if (isAuto) {
+      const sticky = await getStickyModel(ctx.request, ctx.session_id, resolvedStrategy);
+      if (sticky) {
+        const idx = ordered.findIndex((c) => `${c.platform}/${c.model}` === sticky);
+        if (idx > 0) {
+          const [preferred] = ordered.splice(idx, 1);
+          ordered.unshift(preferred);
+        }
+      }
+    }
+
+    // 7. Soft margin preference: requests that only fit the RAW window (not the
+    // 1.25× safety margin) sit behind margin-fitting models of the same tier —
+    // never excluded, so the worst case is one classified 400 hop, not an
+    // empty pool. Stable within each band.
+    const estimatedTokens = estimateRequestTokens(ctx.request);
+    const outputReserve = routingReserveTokens(ctx.request.max_tokens);
+    const marginFits = ordered.filter((c) => fitsContextWindow(c.metrics.context_window, estimatedTokens, outputReserve));
+    const marginDeferred = ordered.filter((c) => !fitsContextWindow(c.metrics.context_window, estimatedTokens, outputReserve));
+    ordered = [...marginFits, ...marginDeferred];
+
+    // 8. Primary = top of chain, Fallback Chain = next candidates (dedup by key)
+    const primary = ordered[0];
     const chainCandidates: ScoredCandidate[] = [];
     const usedKeys = new Set<string>([primary.key.id]);
-    for (const c of scored.slice(1)) {
+    for (const c of ordered.slice(1)) {
       if (usedKeys.has(c.key.id)) continue;
       usedKeys.add(c.key.id);
       chainCandidates.push(c);
       if (chainCandidates.length >= 6) break;
     }
     const fallbackChain = chainCandidates.map(this.toFallbackEntry);
-    console.log(`[router] candidates=${candidates.length} scored=${scored.length} keys=${new Set(scored.map((s2) => s2.key.id)).size} chain=${fallbackChain.length}`);
+    console.log(`[router] candidates=${candidates.length} scored=${scored.length} keys=${new Set(scored.map((s2) => s2.key.id)).size} chain=${fallbackChain.length} strategy=${resolvedStrategy}${bandit ? "" : " (priority)"}`);
 
     // Build metadata including resolved strategy for audit
     const strategyInfo = resolvedStrategy
@@ -307,9 +597,16 @@ export class SmartRouter {
       fallback_chain: fallbackChain,
       metadata: {
         score: primary.score,
-        reason: `bandit-top1 ${primary.free ? "FREE" : "paid"}${strategyInfo} (latency:${primary.metrics.latency_p50}ms cost:$${primary.metrics.cost_per_1k}/1k quality:${primary.metrics.quality_score} reliability:${primary.metrics.success_rate})`,
+        reason: `${bandit ? "bandit-top1" : "priority-top1"} ${primary.free ? "FREE" : "paid"}${strategyInfo} ` +
+          `(reliability:${primary.metrics.success_rate.toFixed(2)} tok/s:${primary.metrics.weighted_tok_per_sec.toFixed(1)} ` +
+          `penalty:${primary.metrics.penalty} $/1k:${primary.metrics.cost_per_1k})`,
       },
     };
+  }
+
+  /** Deterministic reliability expectation for the floor filter. */
+  private expectedReliabilityFor(c: { metrics: CachedMetrics }): number {
+    return expectedReliability(c.metrics.weighted_successes, c.metrics.weighted_failures, c.metrics.community_prior);
   }
 
   /**
@@ -373,6 +670,15 @@ export class SmartRouter {
     // Virtual model names never match a concrete catalog id.
     const virtualModel = ctx.request.model === "auto" || ctx.request.model === "fusion";
 
+    // Per-request capability gates (FreeLLMAPI routeRequest parity): an image
+    // request must never reach a text-only model (the transport succeeds while
+    // the images are silently dropped); a tool request must never reach a
+    // model that 'answers' tools as prose text; and a request whose input
+    // alone exceeds the RAW window or tpm_limit is a guaranteed upstream 400.
+    const requireVision = requestNeedsVision(ctx.request);
+    const requireTools = requestNeedsTools(ctx.request);
+    const gateTokens = estimateRequestTokens(ctx.request);
+
     // For each key, get provider adapter and supported models
     for (const key of dbKeys) {
       if (excludedProviders.has(key.platform)) continue;
@@ -416,13 +722,24 @@ export class SmartRouter {
         const platformHeadroom = quotaHeadroom.get(key.platform);
         const keyHeadroom = platformHeadroom?.get(key.db_id) ?? 1; // 1 = unknown (no quota data)
 
+        const metrics = await this.getMetrics(key.platform, model.id);
+
+        // Capability gates (metrics carry the catalog's capability row):
+        //  - vision/tools: hard gate — silence beats a fake-successful wrong answer
+        //  - RAW context window + tpm_limit: hard gate — guaranteed upstream 400
+        //  - margin-fitting is a SOFT preference applied in route(), not here
+        if (requireVision && !metrics.supports_vision) continue;
+        if (requireTools && !metrics.supports_tools) continue;
+        if (!fitsContextWindowStrict(metrics.context_window, gateTokens)) continue;
+        if (metrics.tpm_limit != null && metrics.tpm_limit > 0 && gateTokens > metrics.tpm_limit) continue;
+
         candidates.push({
           provider: adapter,
           model: model.id,
           key,
           platform: key.platform,
           free: model.free,
-          metrics: await this.getMetrics(key.platform, model.id),
+          metrics,
           quotaHeadroom: keyHeadroom,
         });
       }
@@ -432,56 +749,69 @@ export class SmartRouter {
   }
 
   /**
-     * Bandit Scoring — the single source of truth for routing scores.
-     * Returns a convex combination in [0,1] multiplied by guardrail factors.
-     */
-   private async calculateScore(
+   * Bandit Scoring — the single source of truth for routing scores.
+   * Returns a convex combination in [0,1] multiplied by guardrail factors.
+   *
+   * `deterministic` (dashboard path) swaps the Thompson sample for the Beta
+   * posterior's expectation and drops exploration jitter, so the score table
+   * is stable between polls while still reflecting real observations.
+   *
+   * `keyCounts` scales the per-key monthly budget by the platform's usable-key
+   * count (pooled quota), matching the FreeLLMAPI guardrail semantics.
+   */
+    async calculateScore(
       candidate: Candidate,
       ctx: RoutingContext,
-      resolvedStrategy?: PresetStrategy,
+      resolvedStrategy?: RoutingStrategy,
+      opts: { deterministic?: boolean; keyCounts?: Map<string, number> } = {},
     ): Promise<number> {
       const m = candidate.metrics;
+      const deterministic = opts.deterministic ?? false;
 
       // 1) Base weights from resolved strategy (with peak-hours + task-type adjustments)
       // Use the per-request resolved strategy (handles 'decision' strategy via external LLM)
       const strategy = resolvedStrategy ?? await this.getRoutingStrategy();
-      const customWeights = strategy === "custom" ? await this.getCustomWeights() : null;
-      let baseWeights = customWeights ?? BANDIT_PRESETS[strategy as PresetStrategy] ?? BANDIT_PRESETS.balanced;
+      const scoringStrategy: RoutingStrategy = strategy === "priority" ? "balanced" : strategy;
+      const customWeights = scoringStrategy === "custom" ? await this.getCustomWeights() : null;
+      let baseWeights = customWeights ?? BANDIT_PRESETS[scoringStrategy as PresetStrategy] ?? BANDIT_PRESETS.balanced;
 
       const peakConfig = await this.getPeakHoursConfig();
-      const peakResult = peakAdjustedWeights(baseWeights, strategy, peakConfig);
+      const peakResult = peakAdjustedWeights(baseWeights, scoringStrategy, peakConfig);
       baseWeights = peakResult.weights;
 
       const taskWeightShare = await this.getTaskWeightShare();
       // Derive task type from client profile's priority_strategy (code tasks prefer speed, chat tasks prefer cost)
       const priorityStrategy = ctx.client_profile?.priority_strategy;
       const task = priorityStrategy === "speed" ? "code" : "chat";
-      const taskResult = taskAdjustedWeights(baseWeights, task, strategy, taskWeightShare);
+      const taskResult = taskAdjustedWeights(baseWeights, task, scoringStrategy, taskWeightShare);
       baseWeights = taskResult.weights;
 
-      // 2) Reliability: Thompson-sampled Beta posterior with community prior
+      // 2) Reliability: Thompson-sampled Beta posterior with community prior.
+      // Weighted counts are RAW decay-weighted pseudo-counts — alpha/beta grow
+      // with sample size, so a model with 50 successes is confidently high and
+      // a model with 2 is still uncertain.
       const community = candidate.metrics.community_prior ?? await this.getCommunityPrior(candidate.platform, candidate.model);
-      const { alpha, beta } = reliabilityPosterior(
-        candidate.metrics.weighted_successes,
-        candidate.metrics.weighted_failures,
-        community,
-      );
-      const reliabilitySample = sampleBeta(alpha, beta);
+      const sampled = !deterministic;
+      let reliability: number;
+      if (sampled) {
+        const { alpha, beta } = reliabilityPosterior(m.weighted_successes, m.weighted_failures, community);
+        reliability = sampleBeta(alpha, beta);
+      } else {
+        reliability = expectedReliability(m.weighted_successes, m.weighted_failures, community);
+      }
 
-      // Exploration: epsilon-greedy for models with few samples
+      // Exploration: under-observed models (fewer than exploreMinSamples real
+      // observations) get a bounded bonus so cold-start models stay reachable.
       const exploreEnabled = await this.getExploreEnabled();
       const exploreMinSamples = await this.getExploreMinSamples();
-      const totalSamples = candidate.metrics.weighted_successes + candidate.metrics.weighted_failures;
-      let reliability: number;
-      if (exploreEnabled && totalSamples < exploreMinSamples) {
+      const totalSamples = m.weighted_successes + m.weighted_failures;
+      if (!deterministic && exploreEnabled && totalSamples < exploreMinSamples) {
         const explorationBonus = (exploreMinSamples - totalSamples) / exploreMinSamples * 0.15;
-        reliability = reliabilitySample + Math.random() * explorationBonus;
-      } else {
-        reliability = reliabilitySample;
+        reliability = Math.min(1, reliability + Math.random() * explorationBonus);
       }
 
       // 3) Speed: throughput + TTFB blended
-      const speed = speedScore(candidate.metrics.weighted_tok_per_sec, candidate.metrics.weighted_ttfb_ms);
+      const speed = speedScore(m.weighted_tok_per_sec, m.weighted_ttfb_ms || null);
 
       // 4) Intelligence: the composite (size × tier) is computed in computeMetrics
       // and min-max normalized across the chain in route(). Use the normalized
@@ -490,22 +820,30 @@ export class SmartRouter {
       // paths where normalization is a no-op.
       const intelligence = (candidate as any)._normIntelligence ?? candidate.metrics.quality_score;
 
-      // 5) Guardrails
+      // 5) Guardrails — two headroom meters, combined as the WORSE of the two
+      // (both say "close to burning out" on different clocks; multiplying them
+      // would dive below the operator's floor).
       const headroomOpts = await this.getHeadroomThresholds();
-      const monthlyBudgetUsed = 0; // would need token tracking per model/month
-      const monthlyBudgetTotal = 0; // from model's monthly_token_budget
-      const monthlyHeadroom = headroomFactor(monthlyBudgetUsed, monthlyBudgetTotal, headroomOpts);
 
-      // Real quota headroom from provider-quota observations
-      const quotaHeadroom = candidate.quotaHeadroom;
+      // Monthly budget: the catalog label ('~120M') is PER KEY; pool it across
+      // the platform's usable keys, then compare against the model's real
+      // calendar-month token usage.
+      const keyCount = Math.max(1, opts.keyCounts?.get(candidate.platform) ?? 1);
+      const monthlyBudget = parseBudget(m.monthly_token_budget) * keyCount;
+      const monthlyHeadroom = headroomFactor(m.monthly_used_tokens, monthlyBudget, headroomOpts);
 
-      const rateWindowUsed = 0; // would need live window utilization
-      const rateWindow = rateWindowHeadroomFactor(rateWindowUsed, headroomOpts);
+      // Live rate window: worst pressure across rpm/rpd/tpm/tpd from the
+      // requests ledger, so a model near its daily cap demotes BEFORE it 429s.
+      const windowUsed = windowUsedFraction(m);
+      const windowHeadroom = rateWindowHeadroomFactor(windowUsed, headroomOpts);
 
-      const penaltyFactor = rateLimitFactor(candidate.metrics.penalty);
+      const combinedHeadroom = Math.min(
+        monthlyHeadroom, Math.min(windowHeadroom, candidate.quotaHeadroom),
+      );
 
-      // Combined headroom: worst of monthly budget and live quota
-      const combinedHeadroom = Math.min(monthlyHeadroom, quotaHeadroom);
+      // Failure penalty is its OWN axis (429=+3/fail=+1, max 10 → score damp),
+      // not folded into headroom — it says "recently failed", not "low quota".
+      const penaltyFactor = rateLimitFactor(m.penalty);
 
       // 6) Combined score
       const inputs: ScoreInputs = {
@@ -513,13 +851,13 @@ export class SmartRouter {
         speed,
         intelligence,
         headroom: combinedHeadroom,
-        rateLimit: rateWindow * penaltyFactor,
+        rateLimit: penaltyFactor,
       };
 
       let score = combineScore(inputs, baseWeights);
 
       // 7) Exploration jitter (small random tiebreak for models with no data)
-      if (totalSamples < 5) {
+      if (!deterministic && totalSamples < 5) {
         score += Math.random() * 0.02;
       }
 
@@ -527,7 +865,7 @@ export class SmartRouter {
     }
 
     /** Get cached or computed metrics for a provider/model */
-    private async getMetrics(platform: string, modelId: string): Promise<CachedMetrics> {
+    async getMetrics(platform: string, modelId: string): Promise<CachedMetrics> {
     const cacheKey = `${platform}/${modelId}`;
     const cached = this.metricsCache.get(cacheKey);
 
@@ -541,12 +879,33 @@ export class SmartRouter {
     return metrics;
   }
 
-  /** Compute metrics from historical request data with exponential decay (half-life 2 days) */
+  /**
+   * Compute metrics from historical request data with exponential decay
+   * (half-life 2 days), plus the model's catalog row (capabilities, budgets,
+   * limits, chain priority) and live window utilization.
+   *
+   * The decay-weighted success/failure values are RAW pseudo-counts — the Beta
+   * posterior and the exploration gate both need sample size, not a ratio.
+   */
   private async computeMetrics(platform: string, modelId: string): Promise<CachedMetrics> {
     try {
       await initDb();
 
-      // Fetch last 7 days of requests (decay will weight recent ones more)
+      // ── Model catalog row + operator chain position ──────────────────────
+      const modelRows = await query`
+        SELECT m.id AS model_db_id,
+               m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit,
+               m.intelligence_rank, m.speed_rank, m.context_window, m.size_label,
+               m.monthly_token_budget, m.supports_vision, m.supports_tools,
+               m.paid_input_per_m, m.paid_output_per_m,
+               COALESCE(f.priority, 0) AS fallback_priority
+        FROM models m
+        LEFT JOIN fallback_config f ON f.model_db_id = m.id
+        WHERE m.platform = ${platform} AND m.model_id = ${modelId}
+      `;
+      const modelConfig = (modelRows[0] ?? {}) as Record<string, unknown>;
+
+      // ── Decay-weighted outcome/throughput aggregates (7-day window) ─────
       const sinceIso = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
       const rows = await query`
         SELECT latency_ms, status_code as sc, input_tokens, output_tokens, timestamp
@@ -557,29 +916,22 @@ export class SmartRouter {
         LIMIT 2000
       `;
 
-      if (rows.length === 0) {
-        return this.getDefaultMetrics(platform, modelId);
-      }
-
-      // Exponential decay: half-life = 2 days
-      const HALF_LIFE_MS = 2 * 24 * 60 * 60 * 1000;
-      const now = Date.now();
-      const LAMBDA = Math.log(2) / HALF_LIFE_MS;
-
-      let weightedSuccesses = 0;
+      let weightedSuccesses = 0; // RAW decay-weighted pseudo-counts
       let weightedFailures = 0;
-      let weightedTokPerSec = 0;
-      let weightedTtfbMs = 0;
-      let totalWeight = 0;
-
+      let wOutTokens = 0;   // Σ w·output_tokens over successes (throughput numerator)
+      let wLatencyMs = 0;   // Σ w·latency_ms over successes (throughput denominator)
+      let wTtfb = 0;        // Σ w·ttfb over successes
+      let wTtfbCnt = 0;     // Σ w over successes with ttfb
       const latencies: number[] = [];
-      const ttfbValues: number[] = [];
+
+      const HALF_LIFE_MS = 2 * 24 * 60 * 60 * 1000;
+      const LAMBDA = Math.log(2) / HALF_LIFE_MS;
+      const nowMs = Date.now();
 
       for (const r of rows as any[]) {
         const ts = new Date(r.timestamp).getTime();
         if (!Number.isFinite(ts)) continue;
-        const ageMs = now - ts;
-        const weight = Math.exp(-LAMBDA * ageMs);
+        const weight = Math.exp(-LAMBDA * Math.max(0, nowMs - ts));
 
         const sc = Number(r.sc);
         const isSuccess = sc > 0 && sc < 400;
@@ -587,29 +939,26 @@ export class SmartRouter {
         else weightedFailures += weight;
 
         const latency = Number(r.latency_ms);
-        if (latency > 0) latencies.push(latency);
-
-        // Estimate tok/s if we have tokens and latency
-        const outTokens = Number(r.output_tokens) || 0;
-        if (latency > 0 && outTokens > 0) {
-          weightedTokPerSec += (outTokens / (latency / 1000)) * weight;
+        if (latency > 0) {
+          latencies.push(latency);
+          if (isSuccess) {
+            // Throughput: accumulate numerator and denominator separately, so a
+            // slow request dilutes the average by its real time cost instead of
+            // each request voting with an equal-weight ratio.
+            wLatencyMs += weight * latency;
+            wOutTokens += weight * (Number(r.output_tokens) || 0);
+            // TTFB is not recorded per request (the requests table has no
+            // ttfb_ms column); 10% of wall latency is the honest proxy until
+            // the gateway starts recording first-byte time.
+            const ttfb = latency * 0.1;
+            wTtfb += weight * ttfb;
+            wTtfbCnt += weight;
+          }
         }
-
-        // TTFB not directly stored; approximate as 10% of latency for successful requests
-        if (isSuccess && latency > 0) {
-          const ttfb = latency * 0.1;
-          weightedTtfbMs += ttfb * weight;
-          ttfbValues.push(ttfb);
-        }
-
-        totalWeight += weight;
       }
 
-      // Normalize weighted aggregates
-      const normSuccesses = totalWeight > 0 ? weightedSuccesses / totalWeight : 0;
-      const normFailures = totalWeight > 0 ? weightedFailures / totalWeight : 0;
-      const normTokPerSec = totalWeight > 0 ? weightedTokPerSec / totalWeight : 0;
-      const normTtfbMs = totalWeight > 0 ? weightedTtfbMs / totalWeight : 0;
+      const weightedTokPerSec = wLatencyMs > 0 ? wOutTokens / (wLatencyMs / 1000) : 0;
+      const weightedTtfbMs = wTtfbCnt > 0 ? wTtfb / wTtfbCnt : 0;
 
       // Latency p50 from raw latencies (unweighted, as p50 is robust)
       latencies.sort((a: number, b: number) => a - b);
@@ -617,45 +966,77 @@ export class SmartRouter {
         ? latencies[Math.floor(latencies.length * 0.5)]
         : 2000;
 
-      // TTFB p50
-      ttfbValues.sort((a: number, b: number) => a - b);
-      const ttfb_p50 = ttfbValues.length > 0
-        ? ttfbValues[Math.floor(ttfbValues.length * 0.5)]
-        : 300;
-
-      // Success rate from weighted counts
-      const success_rate = normSuccesses + normFailures > 0
-        ? normSuccesses / (normSuccesses + normFailures)
+      // Success rate from the weighted counts (display + reliability-floor fallback)
+      const success_rate = weightedSuccesses + weightedFailures > 0
+        ? weightedSuccesses / (weightedSuccesses + weightedFailures)
         : 0.95;
 
-      // Get model config for intelligence/quality
-      const modelRows = await query`
-        SELECT rpm_limit, tpm_limit, intelligence_rank, speed_rank, context_window, size_label
-        FROM models
-        WHERE platform = ${platform} AND model_id = ${modelId}
-      `;
-      const modelConfig = modelRows[0] ?? {};
+      // ── Live utilization windows ─────────────────────────────────────────
+      // The requests table IS the usage ledger: rpm/rpd/tpm/tpd are counts over
+      // sliding windows. Drives the rate-window headroom guardrail so a model
+      // near its daily cap demotes BEFORE it 429s.
+      let rpmUsed = 0, rpdUsed = 0, tpmUsed = 0, tpdUsed = 0;
+      try {
+        const minIso = new Date(nowMs - 60_000).toISOString();
+        const dayIso = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString();
+        const winRows = await query`
+          SELECT
+            COUNT(*) FILTER (WHERE timestamp >= ${minIso}::text) AS rpm,
+            COUNT(*) AS rpd,
+            COALESCE(SUM(input_tokens + output_tokens) FILTER (WHERE timestamp >= ${minIso}::text), 0) AS tpm,
+            COALESCE(SUM(input_tokens + output_tokens), 0) AS tpd
+          FROM requests
+          WHERE platform = ${platform} AND model = ${modelId}
+            AND timestamp >= ${dayIso}::text
+        `;
+        const w = (winRows[0] ?? {}) as Record<string, number>;
+        rpmUsed = Number(w.rpm ?? 0);
+        rpdUsed = Number(w.rpd ?? 0);
+        tpmUsed = Number(w.tpm ?? 0);
+        tpdUsed = Number(w.tpd ?? 0);
+      } catch { /* window query best-effort */ }
 
-      const quality_score = modelConfig.intelligence_rank
-        ? Math.min(1, modelConfig.intelligence_rank / 100)
+      // Calendar-month token usage for the monthly headroom guardrail
+      let monthlyUsedTokens = 0;
+      try {
+        const monthStartIso = new Date(Date.UTC(nowMs ? new Date(nowMs).getUTCFullYear() : 1970, nowMs ? new Date(nowMs).getUTCMonth() : 0, 1)).toISOString();
+        const monthRows = await query`
+          SELECT COALESCE(SUM(input_tokens + output_tokens), 0) AS used
+          FROM requests
+          WHERE platform = ${platform} AND model = ${modelId}
+            AND timestamp >= ${monthStartIso}::text
+        `;
+        monthlyUsedTokens = Number((monthRows[0] as any)?.used ?? 0);
+      } catch { /* best-effort */ }
+
+      // ── Catalog-derived fields ───────────────────────────────────────────
+      const intelligence_rank = Number(modelConfig.intelligence_rank ?? 0);
+      const quality_score = intelligence_rank
+        ? Math.min(1, intelligence_rank / 100)
         : 0.5;
 
-      // Intelligence composite for chain normalization
-      const sizeLabel = modelConfig.size_label ?? "Medium";
-      const intelRank = modelConfig.intelligence_rank ?? 500;
-      const intelligence_composite = intelligenceComposite(sizeLabel, intelRank);
+      // Intelligence composite for chain normalization (FreeLLMAPI semantics:
+      // composite = size-tier value blended with rank, min-max normalized
+      // across the chain in route()).
+      const sizeLabel = String(modelConfig.size_label ?? "Medium");
+      const intelligence_composite = intelligenceComposite(sizeLabel, intelligence_rank || 500);
 
-      // Estimate cost from pricing (would need provider pricing table)
-      const cost_per_1k = 0.001; // Default, will be improved with pricing table
+      // Real pricing from the paid_*_per_m columns (model-pricing port).
+      // cost_per_1k = mean input/output USD per 1M ÷ 1000. 0 = free/unknown.
+      const paidIn = Number(modelConfig.paid_input_per_m ?? 0);
+      const paidOut = Number(modelConfig.paid_output_per_m ?? 0);
+      const cost_per_1k = (paidIn > 0 || paidOut > 0)
+        ? (paidIn + paidOut) / 2 / 1000
+        : 0;
 
-      // Penalty from rate-limit cooldowns (tracked separately)
+      // Penalty from the failure-penalty ledger (429=+3, fail=+1, max 10)
       let penalty = 0;
       try {
         const penaltyRows = await query`
           SELECT penalty FROM rate_limit_penalties
           WHERE platform = ${platform} AND model_id = ${modelId}
         `;
-        penalty = penaltyRows[0]?.penalty ?? 0;
+        penalty = Number(penaltyRows[0]?.penalty ?? 0);
       } catch { /* table may not exist yet */ }
 
       return {
@@ -664,11 +1045,26 @@ export class SmartRouter {
         quality_score,
         success_rate,
         last_updated: Date.now(),
-        weighted_successes: normSuccesses,
-        weighted_failures: normFailures,
-        weighted_tok_per_sec: normTokPerSec,
-        weighted_ttfb_ms: normTtfbMs,
+        weighted_successes: weightedSuccesses,
+        weighted_failures: weightedFailures,
+        weighted_tok_per_sec: weightedTokPerSec,
+        weighted_ttfb_ms: weightedTtfbMs,
         penalty,
+        model_db_id: modelConfig.model_db_id != null ? Number(modelConfig.model_db_id) : null,
+        supports_vision: Number(modelConfig.supports_vision ?? 0),
+        supports_tools: Number(modelConfig.supports_tools ?? 0),
+        context_window: modelConfig.context_window != null ? Number(modelConfig.context_window) : null,
+        monthly_token_budget: String(modelConfig.monthly_token_budget ?? ""),
+        rpm_limit: modelConfig.rpm_limit != null ? Number(modelConfig.rpm_limit) : null,
+        rpd_limit: modelConfig.rpd_limit != null ? Number(modelConfig.rpd_limit) : null,
+        tpm_limit: modelConfig.tpm_limit != null ? Number(modelConfig.tpm_limit) : null,
+        tpd_limit: modelConfig.tpd_limit != null ? Number(modelConfig.tpd_limit) : null,
+        fallback_priority: Number(modelConfig.fallback_priority ?? 0),
+        monthly_used_tokens: monthlyUsedTokens,
+        rpm_used: rpmUsed,
+        rpd_used: rpdUsed,
+        tpm_used: tpmUsed,
+        tpd_used: tpdUsed,
         // Store intelligence composite for chain normalization in route()
         // @ts-ignore - dynamic property
         intelligence_composite,
@@ -684,31 +1080,45 @@ export class SmartRouter {
     try {
       await initDb();
       const rows = await query`
-        SELECT rpm_limit, tpm_limit, intelligence_rank, context_window, speed_rank
-        FROM models
-        WHERE platform = ${platform} AND model_id = ${modelId}
+        SELECT m.id AS model_db_id, m.rpm_limit, m.rpd_limit, m.tpm_limit, m.tpd_limit,
+               m.intelligence_rank, m.context_window, m.speed_rank,
+               m.monthly_token_budget, m.supports_vision, m.supports_tools,
+               m.paid_input_per_m, m.paid_output_per_m,
+               COALESCE(f.priority, 0) AS fallback_priority
+        FROM models m
+        LEFT JOIN fallback_config f ON f.model_db_id = m.id
+        WHERE m.platform = ${platform} AND m.model_id = ${modelId}
       `;
-      const config = rows[0] ?? {};
+      const config = (rows[0] ?? {}) as Record<string, unknown>;
 
       // Estimate latency from speed_rank (lower rank = faster)
-      const speed_rank = config.speed_rank ?? 50;
+      const speed_rank = Number(config.speed_rank ?? 50);
       const latency_p50 = Math.max(500, speed_rank * 50); // Rough estimate
 
-      const quality_score = config.intelligence_rank
-        ? Math.min(1, config.intelligence_rank / 100)
+      const intelligence_rank = Number(config.intelligence_rank ?? 0);
+      const quality_score = intelligence_rank
+        ? Math.min(1, intelligence_rank / 100)
         : 0.5;
 
+      const paidIn = Number(config.paid_input_per_m ?? 0);
+      const paidOut = Number(config.paid_output_per_m ?? 0);
+      const cost_per_1k = (paidIn > 0 || paidOut > 0) ? (paidIn + paidOut) / 2 / 1000 : 0;
+
       return {
+        ...DEFAULT_METRICS,
         latency_p50,
-        cost_per_1k: 0.001,
+        cost_per_1k,
         quality_score,
-        success_rate: 0.95,
-        last_updated: Date.now(),
-        weighted_successes: 0,
-        weighted_failures: 0,
-        weighted_tok_per_sec: 0,
-        weighted_ttfb_ms: 0,
-        penalty: 0,
+        model_db_id: config.model_db_id != null ? Number(config.model_db_id) : null,
+        supports_vision: Number(config.supports_vision ?? 0),
+        supports_tools: Number(config.supports_tools ?? 0),
+        context_window: config.context_window != null ? Number(config.context_window) : null,
+        monthly_token_budget: String(config.monthly_token_budget ?? ""),
+        rpm_limit: config.rpm_limit != null ? Number(config.rpm_limit) : null,
+        rpd_limit: config.rpd_limit != null ? Number(config.rpd_limit) : null,
+        tpm_limit: config.tpm_limit != null ? Number(config.tpm_limit) : null,
+        tpd_limit: config.tpd_limit != null ? Number(config.tpd_limit) : null,
+        fallback_priority: Number(config.fallback_priority ?? 0),
       };
     } catch {
       return DEFAULT_METRICS;
@@ -853,6 +1263,161 @@ interface ScoredCandidate extends Candidate {
 /** Global router instance */
 export const smartRouter = new SmartRouter();
 
+// ── Dashboard routing scores (FreeLLMAPI getRoutingScores parity) ────────────
+
+/** Per-model score breakdown for the dashboard model list. Deterministic
+ * (expected reliability, no Thompson sample, no jitter) so the table is stable
+ * between 15s polls while still reflecting real observations. */
+export interface RoutingScore {
+  modelDbId: number;
+  platform: string;
+  modelId: string;
+  displayName: string;
+  enabled: boolean;
+  reliability: number;
+  speed: number;
+  intelligence: number;
+  headroom: number;
+  rateLimit: number;
+  score: number;
+  totalRequests: number; // decay-weighted observations over the 7-day window
+}
+
+export interface RoutingScoresPayload {
+  strategy: RoutingStrategy;
+  keySelectionStrategy: KeySelectionStrategy;
+  weights: Record<string, number> | null;
+  customWeights: Record<string, number>;
+  presets: Record<string, Record<string, number>>;
+  exploreEnabled: boolean;
+  peakAdjusted: boolean;
+  peakHours: PeakHoursConfig;
+  scores: RoutingScore[];
+}
+
+/**
+ * Score the whole enabled catalog for the dashboard. `weights` is what the
+ * router would use RIGHT NOW (peak-hours-adjusted; under 'priority' the table
+ * still scores under balanced so the columns mean something); `customWeights`
+ * always carries the saved vector (or balanced) so the sliders render before
+ * the operator has saved their own.
+ */
+export async function getRoutingScores(): Promise<RoutingScoresPayload> {
+  await initDb();
+  const strategy = await smartRouter.getRoutingStrategy();
+  const peakHours = await smartRouter.getPeakHoursConfig();
+  const exploreEnabled = await smartRouter.getExploreEnabled();
+  const customWeights = (await smartRouter.getCustomWeights()) ?? BANDIT_PRESETS.balanced;
+
+  // Deterministic weights for display under the active strategy
+  const displayStrategy: RoutingStrategy = strategy === "decision" ? "balanced" : strategy;
+  const baseWeights = displayStrategy === "custom"
+    ? customWeights
+    : BANDIT_PRESETS[(displayStrategy === "priority" ? "balanced" : displayStrategy) as PresetStrategy] ?? BANDIT_PRESETS.balanced;
+  const peakResult = peakAdjustedWeights(baseWeights, displayStrategy, peakHours);
+  const weightsForStrategy: Record<string, number> | null =
+    strategy === "priority" ? null : { ...peakResult.weights };
+
+  const enabledKeys = await query`
+    SELECT platform FROM api_keys WHERE enabled = true AND status = 'healthy'
+  `;
+  const keyCounts = new Map<string, number>();
+  for (const k of enabledKeys as any[]) keyCounts.set(k.platform, (keyCounts.get(k.platform) ?? 0) + 1);
+
+  // The whole enabled catalog, chain order first (LEFT JOIN keeps unchained rows)
+  const chain = await query`
+    SELECT m.id AS model_db_id, m.platform, m.model_id, m.display_name,
+           COALESCE(f.enabled, 0) AS enabled, COALESCE(f.priority, 0) AS priority
+    FROM models m
+    LEFT JOIN fallback_config f ON f.model_db_id = m.id
+    WHERE m.enabled = 1
+    ORDER BY f.priority ASC NULLS LAST
+    LIMIT 500
+  `;
+
+  // Score each under deterministic weights with chain-normalized intelligence
+  const scoredRows: Array<ScoredCandidate & { displayName: string; modelDbId: number; chainEnabled: boolean }> = [];
+  for (const row of chain as any[]) {
+    const metrics = await smartRouter.getMetrics(row.platform, row.model_id);
+    const adapter = providerRegistry.get(row.platform);
+    const composite = (metrics as any).intelligence_composite ?? 0;
+    const candidate = {
+      provider: adapter!,
+      model: row.model_id,
+      key: { id: `dash-${row.model_db_id}`, db_id: 0, platform: row.platform, label: "", encrypted_key: "", iv: "", auth_tag: "", status: "healthy", enabled: true, base_url: null, monthly_request_cap: 0, monthly_token_cap: 0 } as unknown as ApiKey,
+      platform: row.platform,
+      free: metrics.cost_per_1k === 0,
+      metrics: { ...metrics, intelligence_composite: composite } as CachedMetrics,
+      quotaHeadroom: 1,
+      displayName: row.display_name ?? row.model_id,
+      modelDbId: Number(row.model_db_id),
+      chainEnabled: Number(row.enabled) === 1,
+      score: 0,
+    };
+    scoredRows.push(candidate as any);
+  }
+
+  const composites = scoredRows.map((c) => (c.metrics as any).intelligence_composite ?? 0);
+  const intelMin = composites.length ? Math.min(...composites) : 0;
+  const intelMax = composites.length ? Math.max(...composites) : 0;
+  for (const c of scoredRows) {
+    const composite = (c.metrics as any).intelligence_composite ?? 0;
+    (c as any)._normIntelligence = intelMax > intelMin ? (composite - intelMin) / (intelMax - intelMin) : 1;
+  }
+
+  const ctxStub = { request: { model: "auto", messages: [] }, available_keys: [] } as unknown as RoutingContext;
+  const scores: RoutingScore[] = [];
+  for (const c of scoredRows) {
+    const score = await smartRouter.calculateScore(c, ctxStub, displayStrategy, { deterministic: true, keyCounts });
+    const m = c.metrics;
+    const community = m.community_prior ?? await smartRouter.getCommunityPrior(c.platform, c.model);
+    const headroomOpts = { rampStart: undefined, floor: undefined };
+    scores.push({
+      modelDbId: c.modelDbId,
+      platform: c.platform,
+      modelId: c.model,
+      displayName: c.displayName,
+      enabled: c.chainEnabled,
+      reliability: expectedReliability(m.weighted_successes, m.weighted_failures, community),
+      speed: speedScore(m.weighted_tok_per_sec, m.weighted_ttfb_ms || null),
+      intelligence: (c as any)._normIntelligence,
+      headroom: Math.min(
+        headroomFactor(m.monthly_used_tokens, parseBudget(m.monthly_token_budget) * Math.max(1, keyCounts.get(c.platform) ?? 1), headroomOpts),
+        rateWindowHeadroomFactor(windowUsedFraction(m), headroomOpts),
+      ),
+      rateLimit: rateLimitFactor(m.penalty),
+      score,
+      totalRequests: Math.round(m.weighted_successes + m.weighted_failures),
+    });
+  }
+  scores.sort((a, b) => b.score - a.score);
+
+  return {
+    strategy,
+    keySelectionStrategy: ((await getSetting<KeySelectionStrategy>("routing_key_selection")) ?? "auto"),
+    weights: weightsForStrategy,
+    customWeights: { ...customWeights },
+    presets: BANDIT_PRESETS as unknown as Record<string, Record<string, number>>,
+    exploreEnabled,
+    peakAdjusted: peakResult.adjusted ?? isPeakHoursActiveNow(strategy, peakHours),
+    peakHours,
+    scores,
+  };
+}
+
+/** True when the clock is inside the configured peak window for this strategy. */
+function isPeakHoursActiveNow(strategy: RoutingStrategy, cfg: PeakHoursConfig): boolean {
+  if (!cfg?.enabled) return false;
+  if (isPeakExemptStrategy(strategy)) return false;
+  const now = new Date();
+  const hour = hourInTimezone(now, cfg.timezone);
+  return hourInWindow(hour, cfg.startHour, cfg.endHour);
+}
+
+function hourInWindow(hour: number, start: number, end: number): boolean {
+  return start <= end ? hour >= start && hour < end : hour >= start || hour < end;
+}
+
 /**
  * Execute chat with automatic fallback chain retry.
  * Tries primary, then each fallback in order until success or exhausted.
@@ -899,6 +1464,12 @@ export async function executeWithFallback(
   if (primaryResult.error) console.warn(`[router] primary failed: ${String(primaryResult.error).slice(0, 200)}`);
   if (!primaryResult.error) {
     await recordModelSuccess(decision.provider.id, decision.model);
+    // Conversation affinity: remember the model that actually served this
+    // auto-routed turn so follow-ups stick to it (KV-cache warmth, consistent
+    // behavior). Explicit model pins don't need affinity.
+    if (isVirtualModel(request.model)) {
+      await setStickyModel(request, `${decision.provider.id}/${decision.model}`, ctx.session_id);
+    }
     if (primaryResult.response) {
       (primaryResult.response as unknown as Record<string, unknown>)._routed_via = {
         platform: decision.provider.id,
@@ -939,6 +1510,11 @@ export async function executeWithFallback(
     }
     if (!result.error) {
       await recordModelSuccess(fallback.provider, fallback.model);
+      // Sticky affinity follows the model that ACTUALLY served, including
+      // when the primary failed over — the next turn starts where this one ended.
+      if (isVirtualModel(request.model)) {
+        await setStickyModel(request, `${fallback.provider}/${fallback.model}`, ctx.session_id);
+      }
       // Log fallback usage
       console.log(`[router] Fallback used: ${fallback.provider}/${fallback.model} (primary failed: ${primaryResult.error})`);
       if (result.response) {
@@ -1002,6 +1578,11 @@ export function summarizeExhaustion(result: ProviderResult): {
 
 function primaryString(err: unknown): string {
   return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+}
+
+/** The router — not the caller — chose the model for these virtual names. */
+function isVirtualModel(model: string | undefined): boolean {
+  return !model || model === "auto" || model === "fusion";
 }
 
 /** Get API key by database ID */
