@@ -121,7 +121,7 @@ mediaRouter.post("/audio/speech", async (c) => {
 });
 
 /** List available media models */
-mediaRouter.get("/models", async (c) => {
+mediaRouter.get("/media/models", async (c) => {
   return c.json(listMediaModels());
 });
 
