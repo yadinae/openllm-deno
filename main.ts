@@ -151,7 +151,7 @@ console.log("[openllm] request logger started (batch flush every 5s)");
 
 // Settings routes middleware — intercepts /settings/* BEFORE any route matching
 // to ensure they never fall through to the SPA catch-all.
-app.all("/settings/*", async (c) => {
+app.use("/settings/*", async (c, next) => {
   const path = c.req.path;
   // Known settings endpoints — serve directly
   if (path === "/settings/anthropic-map") {
@@ -189,7 +189,7 @@ app.all("/settings/*", async (c) => {
       return c.json({ success: true, family: body.family });
     }
   }
-  // Unknown settings path
+  // Unknown settings path or method
   return c.json({ error: { type: "invalid_request_error", message: "Not found" } }, 404);
 });
 
