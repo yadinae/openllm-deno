@@ -303,7 +303,7 @@ app.all("*", async (c) => {
     if (path === "/settings/anthropic-map") {
       if (c.req.method === "GET") {
         const map = await getClaudeModelMap();
-        return c.json({ map });
+        return c.json({ map, _deployed: "2026-10-23-v1" });
       }
       if (c.req.method === "PUT") {
         let body: unknown;
