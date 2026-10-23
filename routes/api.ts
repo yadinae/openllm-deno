@@ -3,7 +3,7 @@
  */
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
-import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, listCatalogModels, patchCatalogModel, deleteCatalogModel, getCatalogModelById, type CatalogModel } from "../db/pg.ts";
+import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, queryRaw, listCatalogModels, patchCatalogModel, deleteCatalogModel, getCatalogModelById, type CatalogModel } from "../db/pg.ts";
 import { getRoutingScores } from "../services/router.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
@@ -710,6 +710,171 @@ api.get("/fallback/quota-forecast", async (c) => {
   const forecast = await getQuotaForecast();
   const customModelBudgets = await getCustomModelBudgetForecasts();
   return c.json({ forecast, customModelBudgets, generatedAt: new Date().toISOString() });
+});
+
+/** GET /fallback/decisions — routing decision audit trail (last N entries). */
+api.get("/fallback/decisions", async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 100, 1), 500);
+  try {
+    const rows = await query`
+      SELECT id, platform, model, key_id AS "keyId", key_label AS "keyLabel",
+             status_code AS "statusCode", input_tokens AS "inputTokens",
+             output_tokens AS "outputTokens", latency_ms AS "latencyMs",
+             is_primary AS "isPrimary", error, timestamp,
+             COALESCE(routed_via_provider, platform) AS "routedViaProvider",
+             COALESCE(routed_via_model, model) AS "routedViaModel"
+      FROM requests
+      WHERE is_primary IS NOT NULL OR routed_via_provider IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ${limit}
+    `;
+    return c.json({ decisions: rows });
+  } catch (e) {
+    console.warn("[api] /fallback/decisions failed:", e instanceof Error ? e.message : e);
+    return c.json({ decisions: [] });
+  }
+});
+
+/**
+ * GET /fallback/exhaustion/:platform/:model — summarize why a model is
+ * unhealthy + recovery countdown (Retry-After / cooldown remaining /
+ * next month reset).
+ */
+api.get("/fallback/exhaustion/:platform/:model", async (c) => {
+  const { platform, model } = c.req.param();
+  try {
+    // Check current cooldown state
+    const cooldownRows = await query`
+      SELECT *,
+             (expires_at - ${Date.now()}) AS remaining_ms
+      FROM rate_limit_cooldowns
+      WHERE platform = ${platform} AND model = ${model}
+      ORDER BY expires_at DESC
+      LIMIT 5
+    `;
+
+    // Check penalties
+    const penaltyRows = await query`
+      SELECT penalty, updated_at AS "updatedAt"
+      FROM rate_limit_penalties
+      WHERE platform = ${platform} AND model = ${model}
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `;
+
+    // Check monthly budget for custom models
+    const isCustom = model.startsWith("custom/") || `${platform}/${model}`.includes("custom/");
+    let budgetInfo: { limit?: number; used?: number; resetAt?: string } | null = null;
+    if (isCustom) {
+      try {
+        const { getCustomModelMonthlyBudget, getCustomModelMonthlyUsage } = await import("../services/custom-model-budget.ts");
+        const budget = await getCustomModelMonthlyBudget(`${platform}/${model}`);
+        const usage = await getCustomModelMonthlyUsage(`${platform}/${model}`);
+        if (budget > 0) {
+          budgetInfo = {
+            limit: budget,
+            used: usage.tokens,
+            resetAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          };
+        }
+      } catch {}
+    }
+
+    const activeCooldowns = cooldownRows.filter((r: any) => Number(r.remaining_ms) > 0);
+    const recoveryMs = activeCooldowns.length > 0
+      ? Math.min(...activeCooldowns.map((r: any) => Number(r.remaining_ms)))
+      : 0;
+
+    const result = {
+      platform,
+      model,
+      isActive: activeCooldowns.length > 0,
+      activeCooldowns: activeCooldowns.length,
+      allCooldowns: cooldownRows.length,
+      penalty: penaltyRows[0]?.penalty ?? 0,
+      recoveryMs: recoveryMs > 0 ? Math.round(recoveryMs) : null,
+      budget: budgetInfo,
+      explanation: activeCooldowns.length > 0
+        ? `Model is benched. Recovery in ${Math.round(recoveryMs / 1000)}s.`
+        : penaltyRows[0]?.penalty > 0
+          ? `Model carries a penalty of ${penaltyRows[0].penalty}. Will be retried as penalty decays.`
+          : budgetInfo
+            ? `Custom model monthly budget: ${budgetInfo.used}/${budgetInfo.limit} tokens used. Resets ${budgetInfo.resetAt}.`
+            : "Model is available.",
+    };
+    return c.json(result);
+  } catch (e) {
+    console.warn("[api] /fallback/exhaustion failed:", e instanceof Error ? e.message : e);
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/** GET /fallback/analytics/tokens — daily token usage trend (last 30 days). */
+api.get("/fallback/analytics/tokens", async (c) => {
+  const days = Math.min(Math.max(Number(c.req.query("days")) || 30, 1), 90);
+  try {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const rows = await queryRaw(
+      `SELECT date(timestamp) as day,
+              sum(input_tokens) as input_tokens,
+              sum(output_tokens) as output_tokens,
+              count(*) as requests,
+              count(distinct platform) as platforms
+       FROM requests
+       WHERE timestamp >= ?
+       GROUP BY date(timestamp)
+       ORDER BY day ASC`,
+      [since]
+    );
+    return c.json({ days, daily: rows });
+  } catch {
+    return c.json({ days, daily: [] });
+  }
+});
+
+/** GET /fallback/analytics/requests — hourly request volume (last 24h). */
+api.get("/fallback/analytics/requests", async (c) => {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const rows = await queryRaw(
+      `SELECT strftime('%Y-%m-%dT%H:00:00Z', timestamp) as hour,
+              count(*) as requests,
+              sum(input_tokens + output_tokens) as tokens,
+              count(*) filter (where status_code = 200) as successful,
+              count(*) filter (where status_code != 200) as failed
+       FROM requests
+       WHERE timestamp >= ?
+       GROUP BY hour
+       ORDER BY hour ASC`,
+      [since]
+    );
+    return c.json({ hours: rows });
+  } catch {
+    return c.json({ hours: [] });
+  }
+});
+
+/** GET /fallback/analytics/models — model distribution pie (top 20 by request count). */
+api.get("/fallback/analytics/models", async (c) => {
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 20, 1), 100);
+  try {
+    const rows = await query`
+      SELECT platform, model,
+             count(*) as "requests",
+             sum(input_tokens) as "inputTokens",
+             sum(output_tokens) as "outputTokens",
+             avg(latency_ms) as "avgLatencyMs",
+             count(*) filter (where status_code = 200) * 100.0 / count(*) as "successRate"
+      FROM requests
+      WHERE timestamp >= ${new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()}::text
+      GROUP BY platform, model
+      ORDER BY count(*) DESC
+      LIMIT ${limit}
+    `;
+    return c.json({ models: rows });
+  } catch {
+    return c.json({ models: [] });
+  }
 });
 
 /** POST /fallback/cooldown-probe/trigger — manual probe pass for the dashboard. */
