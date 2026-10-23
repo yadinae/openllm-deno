@@ -14,6 +14,15 @@ import { requestLogger, generateRequestId } from "../services/request-log.ts";
 import { smartRouter, executeWithFallback } from "../services/router.ts";
 import { runFusion, type FusionConfig } from "../services/fusion.ts";
 import {
+  runPreflight,
+  hasEnabledVisionModel,
+  hasEnabledToolsModel,
+  injectRoutedVia,
+  buildRoutedViaHeader,
+  logProxySuccess,
+  logProxyFailure,
+} from "../services/proxy-engine.ts";
+import {
   traceRouteEvent,
   isRetryableError,
   isModelNotFoundError,
@@ -124,6 +133,74 @@ chatRouter.post("/chat/completions", async (c) => {
   if (!body.model) {
     body.model = "auto";
   }
+
+  // ── Proxy pre-flight (FreeLLMAPI parity) ──────────────────────────────────
+  // Normalize messages, count images, estimate tokens, check vision/tools gates.
+  // Run before routing so we can short-circuit with clear errors.
+  const preflight = runPreflight(body);
+  const requestId = preflight.requestId;
+  const executionId = preflight.executionId;
+  const abortController = preflight.abortController;
+  const clientGoneFlag = preflight.clientGoneFlag;
+
+  // Attach requestId to response headers for client-side correlation
+  c.header("X-Request-ID", requestId);
+
+  // Vision gate: reject early if images but no vision model
+  if (preflight.hasImage) {
+    const visionOk = await hasEnabledVisionModel();
+    if (!visionOk) {
+      traceRouteEvent("Proxy", {
+        event: "fail",
+        requestId,
+        attempt: 0,
+        platform: "auto",
+        model: "auto",
+        error: "no_vision_model",
+      });
+      return c.json({
+        error: {
+          message: "This request includes an image, but no vision-capable model is enabled. Enable a vision model (e.g. Gemini 2.5 Flash, Llama 4 Scout) in the Fallback Chain.",
+          type: "invalid_request_error",
+          code: "no_vision_model",
+        },
+        execution_id: executionId,
+      }, 422);
+    }
+  }
+
+  // Tools gate: reject early if tools but no tool-capable model
+  if (preflight.wantsTools) {
+    const toolsOk = await hasEnabledToolsModel();
+    if (!toolsOk) {
+      traceRouteEvent("Proxy", {
+        event: "fail",
+        requestId,
+        attempt: 0,
+        platform: "auto",
+        model: "auto",
+        error: "no_tools_model",
+      });
+      return c.json({
+        error: {
+          message: "This request includes tools, but no tool-capable model is enabled. Enable a tool-calling model (e.g. GPT-OSS 120B, Gemini 3.5 Flash, GLM-4.7) in the Fallback Chain.",
+          type: "invalid_request_error",
+          code: "no_tools_model",
+        },
+        execution_id: executionId,
+      }, 422);
+    }
+  }
+
+  // Pre-flight trace
+  traceRouteEvent("Proxy", {
+    event: "start",
+    requestId,
+    attempt: 0,
+    platform: "auto",
+    model: body.model,
+    requestedModel: body.model,
+  });
 
   // ── Virtual models (FreeLLMAPI parity) ──────────────────────────────────
   // "auto": SmartRouter bandit scoring across every enabled key + fallback
@@ -289,7 +366,7 @@ chatRouter.post("/chat/completions", async (c) => {
   };
 
   // Generate request ID for logging
-  const requestId = generateRequestId();
+  const explicitRequestId = generateRequestId();
   const startTime = Date.now();
   const fused = false; // TODO: track fusion usage
   const panelSize = undefined;
@@ -312,7 +389,7 @@ chatRouter.post("/chat/completions", async (c) => {
 
   // Log request/response
   await requestLogger.logComplete(
-    requestId,
+    explicitRequestId,
     platform,
     modelId,
     keyEntry.db_id,
