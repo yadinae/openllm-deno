@@ -148,11 +148,9 @@ requestLogger.start();
 console.log("[openllm] request logger started (batch flush every 5s)");
 
 // ── Settings routes (operator configuration) ──────────────────────────────────
-// Registered BEFORE the SPA catch-all so they take precedence
-// DEPLOY_MARKER_v5: 2026-10-23
+// IMPORTANT: These routes are registered BEFORE the SPA catch-all.
 
 app.get("/settings/anthropic-map", async (c) => {
-  console.log("[openllm] /settings/anthropic-map GET matched");
   const map = await getClaudeModelMap();
   return c.json({ map });
 });
@@ -304,7 +302,7 @@ app.all("*", async (c) => {
   if (path.startsWith("/settings/")) {
     return c.json({ error: { type: "invalid_request_error", message: "Settings route placeholder" } }, 404);
   }
-  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health" || path.startsWith("/assets/") || path.startsWith("/favicon") || path.startsWith("/manifest") || path.startsWith("/index.html")) return c.notFound();
+  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health" || path.startsWith("/settings") || path.startsWith("/assets/") || path.startsWith("/favicon") || path.startsWith("/manifest") || path.startsWith("/index.html")) return c.notFound();
 
   // Only GET/HEAD serve static content; everything else is a 404.
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.notFound();
