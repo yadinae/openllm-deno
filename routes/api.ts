@@ -4,7 +4,7 @@
 import { Hono } from "hono";
 import type { ApiKey, ApiKeyModel, ApiKeyCooldown, KeyStatus, Platform } from "../shared/types.ts";
 import { initDb, listApiKeys, saveApiKey, deleteApiKey, saveSetting, getSetting, getAllSettings, getModels as getDiscoveredModels, saveModels, pingDb, getSessionUser, createSession, deleteSession, getFirstUser, updateUserPassword, createUser, type DiscoveredModel, query, queryRaw, listCatalogModels, patchCatalogModel, deleteCatalogModel, getCatalogModelById, type CatalogModel } from "../db/pg.ts";
-import { getRoutingScores } from "../services/router.ts";
+import { getRoutingScores, summarizeExhaustion } from "../services/router.ts";
 import { hasEncryptionKey, encryptKey, type DbEntry } from "../db/mod.ts";
 import { SESSION_TTL_MS, hashPassword, hashSessionToken, newSessionToken, verifyPassword } from "../services/auth.ts";
 import { getQuotaForecast } from "../services/quota-forecast.ts";
@@ -885,6 +885,99 @@ api.post("/fallback/cooldown-probe/trigger", async (c) => {
     return c.json({ ok: true, ...r });
   } catch (e) {
     console.warn("[api] cooldown-probe trigger failed:", e instanceof Error ? e.message : e);
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+/**
+ * GET /fallback/recovery/:platform/:model — summarize exhaustion, recovery
+ * countdown, explore/exploit state, and community priors for a given model.
+ */
+api.get("/fallback/recovery/:platform/:model", async (c) => {
+  const { platform, model } = c.req.param();
+  try {
+    // 1) Exhaustion summary
+    // Build a synthetic ProviderResult from the model state for summarizeExhaustion
+    // (summarizeExhaustion reads provider_metadata.exhausted_chain)
+    let exhaustionSummary = null;
+    try {
+      const cooldownRows = await query`
+        SELECT *,
+               (expires_at - ${Date.now()}) AS remaining_ms
+        FROM rate_limit_cooldowns
+        WHERE platform = ${platform} AND model = ${model}
+        ORDER BY expires_at DESC
+        LIMIT 5
+      `;
+      const penaltyRows = await query`
+        SELECT penalty, updated_at AS "updatedAt"
+        FROM rate_limit_penalties
+        WHERE platform = ${platform} AND model = ${model}
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+      const activeCooldowns = cooldownRows.filter((r: any) => Number(r.remaining_ms) > 0);
+      const recoveryMs = activeCooldowns.length > 0
+        ? Math.min(...activeCooldowns.map((r: any) => Number(r.remaining_ms)))
+        : 0;
+
+      // 2) Recovery countdown
+      const cooldownReset = recoveryMs > 0
+        ? { remainingMs: Math.round(recoveryMs), seconds: Math.round(recoveryMs / 1000) }
+        : null;
+
+      // 3) Monthly budget reset
+      let budgetReset = null;
+      const isCustom = model.startsWith("custom/") || `${platform}/${model}`.includes("custom/");
+      if (isCustom) {
+        const { getCustomModelMonthlyBudget, getCustomModelMonthlyUsage, secondsUntilNextMonth } =
+          await import("../services/custom-model-budget.ts");
+        const budget = await getCustomModelMonthlyBudget(`${platform}/${model}`);
+        if (budget > 0) {
+          const usage = await getCustomModelMonthlyUsage(`${platform}/${model}`);
+          budgetReset = {
+            limit: budget,
+            used: usage.tokens,
+            remaining: Math.max(0, budget - usage.tokens),
+            remainingPct: Math.round((Math.max(0, budget - usage.tokens) / budget) * 1000) / 10,
+            secondsUntilReset: secondsUntilNextMonth(),
+          };
+        }
+      }
+
+      // 4) Community priors
+      let communityPrior = null;
+      try {
+        const { smartRouter } = await import("../services/router.ts");
+        const prior = await smartRouter.getCommunityPrior(platform, model);
+        if (prior) communityPrior = prior;
+      } catch {}
+
+      // 5) Explore / exploit state
+      let exploreState = null;
+      try {
+        const { smartRouter } = await import("../services/router.ts");
+        const exploreEnabled = await smartRouter.getExploreEnabled();
+        const exploreMinSamples = await smartRouter.getExploreMinSamples();
+        exploreState = { exploreEnabled, exploreMinSamples };
+      } catch {}
+
+      exhaustionSummary = {
+        activeCooldowns: activeCooldowns.length,
+        totalCooldowns: cooldownRows.length,
+        penalty: penaltyRows[0]?.penalty ?? 0,
+        recoveryCountdown: cooldownReset,
+        budgetReset,
+        communityPrior,
+        exploreExploit: exploreState,
+      };
+    } catch (e) {
+      console.warn(`[api] recovery query failed for ${platform}/${model}:`, e instanceof Error ? e.message : e);
+    }
+
+    return c.json({ platform, model, recovery: exhaustionSummary });
+  } catch (e) {
+    console.warn("[api] /fallback/recovery failed:", e instanceof Error ? e.message : e);
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });

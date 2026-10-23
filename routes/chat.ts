@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "hono";
-import type { ChatCompletionRequest } from "../providers/types.ts";
+import type { ChatCompletionRequest, ChatCompletionResponse } from "../providers/types.ts";
 import type { DbData, DbEntry } from "../db/mod.ts";
 import { decryptKey } from "../db/mod.ts";
 import { listApiKeys, getSetting } from "../db/pg.ts";
@@ -13,6 +13,13 @@ import type { ProviderResult, ApiKey, RoutingContext } from "../providers/types.
 import { requestLogger, generateRequestId } from "../services/request-log.ts";
 import { smartRouter, executeWithFallback } from "../services/router.ts";
 import { runFusion, type FusionConfig } from "../services/fusion.ts";
+import {
+  traceRouteEvent,
+  isRetryableError,
+  isModelNotFoundError,
+  isPaymentRequiredError,
+  isClientAbortError,
+} from "../services/proxy-helpers.ts";
 
 // Serialize an adapter stream (raw SSE bytes OR parsed chunk iterator) to the
 // client as SSE. Shared by the virtual-model branch and the prefix branch.
@@ -123,10 +130,19 @@ chatRouter.post("/chat/completions", async (c) => {
   // chain retry. "fusion": panel fan-out with tool-call voting and optional
   // judge synthesis. Both bypass the platform-prefix routing below.
   if (body.model === "auto" || body.model === "fusion") {
+    const keys = await loadKeys(db);
     const vRequestId = generateRequestId();
     const vStart = Date.now();
+    traceRouteEvent("Proxy", {
+      event: "start",
+      requestId: vRequestId,
+      attempt: 0,
+      platform: "auto",
+      model: body.model,
+      requestedModel: body.model,
+    });
     try {
-      const ctx: RoutingContext = { request: body, available_keys: [], session_id: c.req.header("x-session-id") ?? undefined };
+      const ctx: RoutingContext = { request: body, available_keys: keys as any, session_id: c.req.header("x-session-id") ?? undefined };
       if (body.model === "fusion") {
         const decision = await smartRouter.route(ctx);
         const storedCfg = ((await getSetting<Record<string, unknown>>("fusion_config")) ?? {}) as Partial<FusionConfig>;
@@ -173,9 +189,22 @@ chatRouter.post("/chat/completions", async (c) => {
       // trail. The router embeds `strategy=<preset>` in every routing reason,
       // so `strategy` in the requests table records what the decision model
       // (or configured default) chose for this request.
-      const routedVia = (res.response as unknown as Record<string, unknown> | null)?._routed_via as { reason?: string } | undefined;
+      const routedVia = (res.response as unknown as Record<string, unknown> | null)?._routed_via as { platform?: string; model?: string; reason?: string } | undefined;
       const strategyMatch = routedVia?.reason?.match(/strategy=(\w+)/);
       const routedStrategy = strategyMatch ? strategyMatch[1] : undefined;
+      const routedModel = routedVia ? `${routedVia.platform}/${routedVia.model}` : "auto";
+      traceRouteEvent("Proxy", {
+        event: res.error ? "fail" : "ok",
+        requestId: vRequestId,
+        attempt: 1,
+        platform: routedVia?.platform ?? "auto",
+        model: routedVia?.model ?? "auto",
+        requestedModel: body.model,
+        latencyMs: Date.now() - vStart,
+        inputTokens: body.messages?.reduce((n: number, m: any) => n + (m.content?.length ?? 0) / 4, 0),
+        outputTokens: res.response?.usage?.completion_tokens,
+        error: res.error,
+      });
       await requestLogger.logComplete(
         vRequestId, "auto", "auto", 0, undefined, body, res.response ?? null,
         Date.now() - vStart, statusCode, res.error, false, undefined, undefined, routedStrategy,
@@ -384,4 +413,159 @@ chatRouter.post("/chat/completions", async (c) => {
   }
 
   return c.json(result.response);
+});
+
+/** POST /v1/completions — legacy text completion endpoint.
+ * Converts prompt/suffix → messages and routes through SmartRouter.
+ */
+chatRouter.post("/completions", async (c) => {
+  const db = c.get("db");
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: { type: "invalid_request_error", message: "Invalid JSON body" } }, 400);
+  }
+
+  // Legacy completions use prompt (string or array) instead of messages
+  const model = (body.model as string) ?? "auto";
+  const prompt = body.prompt;
+  const maxTokens = body.max_tokens != null && Number(body.max_tokens) > 0
+    ? Number(body.max_tokens) : 128;
+  const stream = body.stream === true;
+  const stop = body.stop;
+  const temperature = Number(body.temperature ?? 1);
+  const topP = Number(body.top_p ?? 1);
+
+  let promptText: string;
+  if (typeof prompt === "string") promptText = prompt;
+  else if (Array.isArray(prompt) && prompt.length > 0) {
+    promptText = typeof prompt[0] === "string" ? prompt[0] : prompt[0]?.text ?? "";
+  } else if (prompt && typeof prompt === "object" && "text" in prompt) {
+    promptText = (prompt as { text: unknown }).text as string;
+  } else {
+    promptText = "";
+  }
+
+  // Convert completion format to chat format
+  const chatBody: ChatCompletionRequest = {
+    model,
+    messages: [{ role: "user", content: promptText }],
+    max_tokens: maxTokens,
+    stream,
+    temperature,
+    top_p: topP,
+    ...(stop ? { stop: Array.isArray(stop) ? stop : [stop] } : {}),
+  };
+
+  const requestId = generateRequestId();
+  const startTime = Date.now();
+
+  try {
+    const keys = await loadKeys(db);
+    const enabledKeys = keys.filter((k) => k.enabled);
+
+    // Use auto-routing for legacy completions (router will pick the best chat model)
+    const ctx: RoutingContext = {
+      request: chatBody,
+      available_keys: enabledKeys as any,
+      session_id: c.req.header("x-session-id") ?? undefined,
+    };
+
+    const res = await executeWithFallback(chatBody, ctx);
+    const latencyMs = Date.now() - startTime;
+    const statusCode = res.error ? (res.status ?? 502) : 200;
+
+    traceRouteEvent("Proxy", {
+      event: res.error ? "fail" : "ok",
+      requestId,
+      attempt: 1,
+      platform: res.response ? (res.response as any)?.model ? "auto" : "auto" : "auto",
+      model: model,
+      latencyMs,
+      error: res.error,
+    });
+
+    if (res.error) {
+      const status = (res.status ?? 500) as 400 | 500 | 502 | 503;
+      return c.json({
+        error: {
+          type: status >= 500 ? "server_error" : "invalid_request_error",
+          message: String(res.error).slice(0, 500),
+        },
+        id: requestId,
+        object: "text_completion",
+        created: Math.floor(Date.now() / 1000),
+        model: model,
+      }, status);
+    }
+
+    if (stream && res.stream) {
+      // Pass through streaming
+      return sseFromStream(res.stream);
+    }
+
+    if (stream) {
+      return sseFromResponse(
+        (res.response ?? null) as Record<string, unknown> | null,
+        model,
+      );
+    }
+
+    // Non-streaming: convert chat completion back to text completion format
+    const chatResponse = res.response as unknown as Record<string, unknown> | null;
+    const choices = (chatResponse?.choices as Array<Record<string, unknown>> | undefined) ?? [];
+
+    if (choices.length === 0) {
+      return c.json({
+        id: requestId,
+        object: "text_completion",
+        created: Math.floor(Date.now() / 1000),
+        model: model,
+        choices: [{ text: "", index: 0 }],
+      });
+    }
+
+    const convertedChoices = choices.map((choice, idx) => {
+      const msg = choice.message as Record<string, unknown> | undefined;
+      const text = typeof msg?.content === "string"
+        ? msg.content
+        : Array.isArray(msg?.content)
+          ? (msg.content as Array<{ text?: string }>).map(p => p.text ?? "").join("")
+          : "";
+      return { text, index: idx, ...(choice.finish_reason ? { finish_reason: choice.finish_reason } : {}) };
+    });
+
+    await requestLogger.logComplete(
+      requestId, "completions", model, 0, undefined, body as unknown as ChatCompletionRequest, chatResponse as unknown as (ChatCompletionResponse | null),
+      latencyMs, statusCode, res.error, false, undefined, undefined, undefined,
+    );
+
+    return c.json({
+      id: requestId,
+      object: "text_completion",
+      created: Math.floor(Date.now() / 1000),
+      model: chatResponse?.model ?? model,
+      choices: convertedChoices,
+      usage: chatResponse?.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    traceRouteEvent("Proxy", {
+      event: "fail",
+      requestId,
+      attempt: 1,
+      platform: "auto",
+      model: model,
+      latencyMs: Date.now() - startTime,
+      error: msg,
+    });
+    return c.json({
+      error: { type: "server_error", message: `${model} routing failed: ${msg}` },
+      id: requestId,
+      object: "text_completion",
+      created: Math.floor(Date.now() / 1000),
+      model: model,
+    }, 503);
+  }
 });

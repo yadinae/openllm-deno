@@ -456,7 +456,7 @@ export class SmartRouter {
   /**
    * Get explore min samples from settings.
    */
-  private async getExploreMinSamples(): Promise<number> {
+  async getExploreMinSamples(): Promise<number> {
     return await getSetting<number>(SETTING_EXPLORE_MIN_SAMPLES) ?? 5;
   }
 
