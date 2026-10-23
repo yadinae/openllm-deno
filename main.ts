@@ -261,12 +261,13 @@ app.get("/v1/providers", (c) => {
 });
 
 // ── Static Files (FreeLLMAPI React SPA) ──────────────────────────────────────
+// Skip list v3: includes /settings for operator config endpoints
 
 const DIST = `${Deno.cwd()}/dist`;
 
 app.all("*", async (c) => {
   const path = c.req.path;
-  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health" || path.startsWith("/settings")) return c.notFound();
+  if (path.startsWith("/api/") || path.startsWith("/v1/") || path.startsWith("/v1beta/") || path === "/health" || path.startsWith("/settings") || path.startsWith("/assets/") || path.startsWith("/favicon") || path.startsWith("/manifest") || path.startsWith("/index.html")) return c.notFound();
 
   // Only GET/HEAD serve static content; everything else is a 404.
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return c.notFound();
