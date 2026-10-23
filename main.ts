@@ -149,6 +149,16 @@ console.log("[openllm] request logger started (batch flush every 5s)");
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
+// Settings routes middleware — intercepts /settings/* BEFORE any route matching
+// to ensure they never fall through to the SPA catch-all.
+app.all("/settings/*", async (c, next) => {
+  const path = c.req.path;
+  if (path === "/settings/anthropic-map" || path === "/settings/gemini-map" || path === "/settings/default-embedding-family") {
+    return next();
+  }
+  return c.json({ error: { type: "invalid_request_error", message: "Not found" } }, 404);
+});
+
 app.use("*", async (c, next) => {
   c.set("db", getDb());
   await next();
