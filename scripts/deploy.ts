@@ -120,13 +120,16 @@ try {
     for (const f of staged.sort()) console.log("  ", f);
     console.log("[deploy] --dry-run: not deploying.");
   } else {
-    const args = ["deploy", tmp, "--non-interactive"];
-    if (prod) args.push("--prod");
+    // IMPORTANT: never pass --org/--app here — `deno deploy` reads them from
+    // `deno.json` deploy.org/app already, and the CLI treats a second copy
+    // of the same flag as a "found several times" error and exits 2.
+    // --prod and --token are the only things we add explicitly.
+    const args = ["deploy", "--prod", "--non-interactive"];
     if (token) args.push("--token", token);
-    console.log(`[deploy] deno ${args.map((a) => (a === token ? "***" : a)).join(" ")}`);
+    console.log(`[deploy] ${Deno.execPath()} ${args.map((a) => (a === token ? "***" : a)).join(" ")}`);
     const child = new Deno.Command(Deno.execPath(), {
       args,
-      cwd: ROOT,
+      cwd: tmp,
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",
