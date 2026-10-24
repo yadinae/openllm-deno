@@ -16,6 +16,7 @@
 import { providerRegistry, initializeRegistry } from "../providers/index.ts";
 import { query, initDb, getSetting } from "../db/pg.ts";
 import { getRequestGroupId, traceRouteEvent } from "./proxy-helpers.ts";
+import { reserveProviderCredential } from "./provider-credential.ts";
 initializeRegistry();
 
 export interface EmbeddingModelRow {
@@ -183,7 +184,7 @@ function validateDimensions(data: { embedding: number[] }[], requestedDim: numbe
   }
 }
 
-interface ProviderCredential { id: number; key: string; baseUrl: string | null; }
+interface ProviderCredential { id: number; key: string; baseUrl: string | null; release: () => void; }
 
 const FETCH_TIMEOUT_MS = 30000;
 
@@ -295,7 +296,7 @@ export async function runEmbeddings(model: string | undefined, inputs: string[],
   const hints = new RetryHintTracker();
 
   for (const row of chain) {
-    const key = await getPlatformKey(row.platform);
+    const key = await getPlatformKey(row, estimateTokens(inputs));
     if (!key) continue;
     const started = Date.now();
     try {
@@ -306,8 +307,10 @@ export async function runEmbeddings(model: string | undefined, inputs: string[],
       const tokens = out.inputTokens ?? estimateTokens(inputs);
       traceRouteEvent("Proxy", { event: "ok", requestId, attempt: 1, platform: row.platform, model: row.model_id, latencyMs: Date.now() - started, inputTokens: tokens });
       logEmbeddingRequest(row, key.id, "success", tokens, Date.now() - started, null, requestId);
+      key.release(); // release the monthly-budget reservation on success
       return { family, platform: row.platform, modelId: row.model_id, dimensions: out.vectors[0].length, vectors: out.vectors, inputTokens: tokens };
     } catch (err: unknown) {
+      key.release(); // release on failure so the budget isn't held hostage by a dying upstream
       const e = err instanceof EmbeddingsError ? err : new EmbeddingsError(String((err as Error)?.message ?? err), 502);
       traceRouteEvent("Proxy", { event: "fail", requestId, attempt: 1, platform: row.platform, model: row.model_id, latencyMs: Date.now() - started, error: e.message });
       logEmbeddingRequest(row, key.id, "error", 0, Date.now() - started, e.message.slice(0, 300), requestId);
@@ -321,14 +324,19 @@ export async function runEmbeddings(model: string | undefined, inputs: string[],
   throw new EmbeddingsError(errMsg, lastError?.status === 429 ? 429 : 502, lastError?.code, retryAfterSec ? retryAfterSec * 1000 : undefined);
 }
 
-async function getPlatformKey(platform: string): Promise<ProviderCredential | null> {
-  try {
-    await initDb();
-    const rows = await query`SELECT id, db_id, platform, encrypted_key, iv, auth_tag, base_url FROM api_keys WHERE platform = ${platform} AND enabled = true AND status IN ('healthy', 'unknown') ORDER BY id LIMIT 1`;
-    if (rows.length === 0) return null;
-    const k = rows[0] as any;
-    const { decryptKey } = await import("../db/mod.ts");
-    const secret = await decryptKey(k.encrypted_key, k.iv, k.auth_tag).catch(() => null);
-    return { id: k.db_id, key: secret ?? k.encrypted_key ?? "", baseUrl: k.base_url ?? null };
-  } catch { return null; }
+// ── Budget-aware key resolution ──────────────────────────────────────────────
+
+/**
+ * Resolve a credential for `row` through `reserveProviderCredential`, which
+ * selects a healthy/unknown api_keys row for the platform (or a bound key_id),
+ * decrypts it via Web Crypto, and reserves monthly-budget tokens so the
+ * embeddings router can't over-spend a key's cap.
+ */
+async function getPlatformKey(row: EmbeddingModelRow, estimatedTokens: number): Promise<ProviderCredential | null> {
+  const { credential } = await reserveProviderCredential(
+    { platform: row.platform, key_id: row.key_id ?? null },
+    estimatedTokens,
+  );
+  if (!credential) return null;
+  return { id: credential.id, key: credential.key, baseUrl: credential.baseUrl, release: credential.release };
 }
