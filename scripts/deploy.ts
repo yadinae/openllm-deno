@@ -67,6 +67,11 @@ const prod = !flag("preview");
 const dryRun = flag("dry-run") || flag("dry");
 const seed = !flag("no-seed");
 
+// Defensive: strip any stray --token from Deno.args that the caller may have
+// already forwarded (e.g. `deno run scripts/deploy.ts --token X --no-seed`).
+// We re-add it ourselves below so the child deno process gets exactly one.
+const childArgs = Deno.args.filter((a) => a !== "--token" && !a.startsWith("--token="));
+
 if (!org || !app) {
   console.error("Missing --org/--app (set them in deno.json deploy.* or pass flags).");
   Deno.exit(1);
@@ -130,6 +135,7 @@ try {
     const child = new Deno.Command(Deno.execPath(), {
       args,
       cwd: tmp,
+      env: token ? { DENO_DEPLOY_TOKEN: token } : {},
       stdin: "inherit",
       stdout: "inherit",
       stderr: "inherit",

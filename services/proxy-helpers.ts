@@ -40,8 +40,9 @@ export function extractApiToken(req: Request): string | undefined {
 // ── Request tracing ────────────────────────────────────────────────────────
 
 /** Extract x-request-id or generate a UUID for request grouping. */
-export function getRequestGroupId(req: Request): string {
-  const raw = req.headers.get("x-request-id");
+export function getRequestGroupId(req: Request | { headers?: { get?: (k: string) => string | null } }): string {
+  const get = req.headers?.get?.bind(req.headers);
+  const raw = get ? get("x-request-id") : null;
   const trimmed = (raw as string | null)?.trim();
   return trimmed || globalThis.crypto.randomUUID();
 }
@@ -294,4 +295,46 @@ export function getRecentTraces(limit = 100): RequestTrace[] {
  * kept for API compatibility with FreeLLMAPI imports. */
 export function clearReasoningMemory(): void {
   /* no-op */
+}
+
+/**
+ * Redact credentials / URLs out of a provider error message before it crosses
+ * the trust boundary into logs or client responses. Ported from FreeLLMAPI
+ * `lib/error-redaction.ts` (51 lines, self-contained).
+ */
+const MAX_PROVIDER_ERROR_LENGTH = 240;
+
+const REDACTIONS: Array<[RegExp, string]> = [
+  [/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]"],
+  [/([\"']?)\b(api[_-]?key|access[_-]?token|token|secret|authorization)\b\1(\s*[:=]\s*)([\"']?)[^"',\s}\]]+/gi, "$1$2$1$3$4[redacted]"],
+  [/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted-key]"],
+  [/\bgsk_[A-Za-z0-9_-]{8,}\b/g, "[redacted-key]"],
+  [/\bfreellmapi-[A-Za-z0-9_-]{8,}\b/g, "[redacted-key]"],
+  [/\bAIza[0-9A-Za-z_-]{20,}\b/g, "[redacted-key]"],
+  [/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted-token]"],
+  [/\b[A-Za-z0-9]{32,}\b/g, "[redacted-token]"],
+  [/\bhttps?:\/\/[^\s"'<>)]*/gi, "[redacted-url]"],
+];
+
+export function sanitizeProviderErrorMessage(message: unknown): string {
+  let sanitized = typeof message === "string" ? message : String(message ?? "");
+  sanitized = sanitized.trim();
+  if (!sanitized) return "Provider error";
+  for (const [pattern, replacement] of REDACTIONS) {
+    sanitized = sanitized.replace(pattern, replacement);
+  }
+  sanitized = sanitized.replace(/\\s+/g, " ").trim();
+  if (sanitized.length > MAX_PROVIDER_ERROR_LENGTH) {
+    sanitized = `${sanitized.slice(0, MAX_PROVIDER_ERROR_LENGTH - 3).trimEnd()}...`;
+  }
+  return sanitized;
+}
+
+const MAX_ATTEMPT_ERROR_SUMMARY_LENGTH = 200;
+export function summarizeAttemptError(message: unknown): string {
+  let summary = sanitizeProviderErrorMessage(message);
+  if (summary.length > MAX_ATTEMPT_ERROR_SUMMARY_LENGTH) {
+    summary = `${summary.slice(0, MAX_ATTEMPT_ERROR_SUMMARY_LENGTH - 3).trimEnd()}...`;
+  }
+  return summary;
 }
