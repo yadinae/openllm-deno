@@ -2,7 +2,7 @@
 
 | 日期 | 主题 | 类型 | 文件 |
 |---|---|---|---|
-| 2026-10-23 | deploy.ts 重复参数导致 22 次 /settings 修复全未上线 | 踩坑/根因 | [2026-10-23-deploy-script-bug-wasted-22-settings-commits.md](2026-10-23-deploy-script-bug-wasted-22-settings-commits.md) |
+| 2026-10-23 | 22 次 /settings 修复全未上线——真相是部署从未成功（npx 包装层污染 argv） | 踩坑/根因 | [2026-10-23-deploy-script-bug-wasted-22-settings-commits.md](2026-10-23-deploy-script-bug-wasted-22-settings-commits.md) |
 | 2026-10-22 | Probe 设计重构：auth 校验与模型可用性必须分离（NVIDIA 模型 EOL 导致假阳性） | 踩坑/架构决策 | [2026-10-22-probe-auth-vs-model-error-classification.md](2026-10-22-probe-auth-vs-model-error-classification.md) |
 | 2026-10-22 | gemini.ts 重复顶层 const → warming failed；空错误体是 falsy → 原生路由崩 + `/v1` 空 200（部署历史才是裁判） | 踩坑/修复/验证 | [2026-10-22-gemini-boot-failure-and-empty-error-body.md](2026-10-22-gemini-boot-failure-and-empty-error-body.md) |
 | 2026-10-21 | Gemini 原生协议落地（复核：Hono catch-all 坑 + reasoning_content 合并） | 踩坑/修复/架构 | [2026-10-21-gemini-native.md](2026-10-21-gemini-native.md) |
